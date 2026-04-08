@@ -1,0 +1,24 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "auto-mosaic-backend"
+version = "0.1.0"
+description = "Backend CLI for the Tauri Auto Mosaic prototype"
+requires-python = ">=3.11"
+dependencies = [
+  "opencv-python>=4.10",
+  "typing-extensions>=4.12"
+]
+
+[project.optional-dependencies]
+gpu = ["onnxruntime-gpu[cuda,cudnn]==1.24.4"]
+cpu = ["onnxruntime==1.24.4"]
+torch = ["torch>=2.8,<2.9"]
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]

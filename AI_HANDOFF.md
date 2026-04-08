@@ -1,0 +1,159 @@
+# AI_HANDOFF.md
+
+## Snapshot
+- Frontend recovered shell is now back to a usable editor shape.
+- `App.tsx` is a clean UTF-8 shell again and no longer carries the old mojibake damage.
+- The shared Job Panel remains the common progress surface for runtime jobs, detect jobs, and export.
+- Current desktop build status on April 8, 2026: `npm.cmd run build` in `apps/desktop` passed.
+- Current desktop mojibake check status on April 8, 2026: `npm.cmd run check:mojibake` in `apps/desktop` passed.
+- Current desktop test status on April 8, 2026: `npm.cmd test` in `apps/desktop` passed with `21/21`.
+- Current backend smoke status on April 8, 2026: `python -m pytest tests\\test_cli_smoke.py` in `apps/backend` passed with `62 passed`.
+
+## What Was Fixed In This Pass (April 8, 2026 — ONNX validity + size/hash check)
+
+### Root cause
+After the previous pass (URL repair + HTML guard), a corrupted `.onnx` file could still pass
+`_check_model_file` if it happened to be large enough and not start with HTML bytes (e.g. a
+partially downloaded binary, or a file from a wrong URL that returns valid non-HTML binary).
+
+### Fixes applied
+
+**P1 — ONNX protobuf magic bytes check (`doctor.py`)**
+- Added `_ONNX_PROTO_FIRST_BYTES` frozenset: all valid field tags for the ONNX ModelProto
+  protobuf first byte (0x08 ir_version, 0x12 producer_name, 0x3a graph, 0x42 opset_import, etc.).
+- `_check_model_file` now rejects any `.onnx` file whose first byte is not in this set.
+
+**P2 — size + SHA-256 metadata in catalog (`model_catalog.py`, `doctor.py`)**
+- Added `expected_size: int | None` and `expected_sha256: str | None` to `ModelSpec`.
+- `320n.onnx` now has known values: size=12150158, sha256=c15d8273…
+- `_check_model_file(path, spec)` now takes the spec and applies (in order, cheapest first):
+  1. Minimum size (existing)
+  2. Exact expected_size match (new — fast, avoids reading the file)
+  3. HTML signature bytes (existing)
+  4. ONNX protobuf first byte (new)
+  5. SHA-256 hash (new — only when expected_sha256 is set)
+- All other models leave expected_size/expected_sha256 as None (values unknown).
+
+### Files changed
+- `apps/backend/src/auto_mosaic/infra/ai/model_catalog.py`
+- `apps/backend/src/auto_mosaic/api/commands/doctor.py`
+- `apps/desktop/src-tauri/resources/review-runtime/…` (re-synced via `review:runtime`)
+
+## What Was Fixed In The Pass Before That (April 8, 2026 — 不足モデル取得ボタン修正)
+
+### Root cause
+The "不足モデルを取得" button's call chain was intact end-to-end, but the download
+destination was silently corrupted:
+
+- The GitHub `browser_download_url` for NudeNet release assets now redirects to
+  `github.com/login` (HTML, 44 KB) instead of the binary file.
+- `_download_to_path` had no Content-Type guard, so the HTML page was written as
+  the `.onnx` file. The job reported success, doctor saw "file exists", and the UI
+  showed the model as available — even though the file was invalid.
+
+### Fixes applied
+
+**P0 — URL repair + download headers (`model_catalog.py`, `fetch_models.py`)**
+- Replaced GitHub `browser_download_url` with GitHub API asset URLs:
+  - `320n.onnx` → `https://api.github.com/repos/notAI-tech/NudeNet/releases/assets/176831997`
+  - `640m.onnx` → `https://api.github.com/repos/notAI-tech/NudeNet/releases/assets/176832019`
+- Added `request_headers` field to `ModelSpec` (frozen dataclass).
+  NudeNet API URLs need `Accept: application/octet-stream` to return binary.
+- `_download_to_path` now builds a `urllib.request.Request` with per-spec headers
+  instead of calling `urlopen(url)` directly.
+- Added Content-Type guard: raises `ValueError` immediately when server returns
+  `text/html`, preventing any HTML page from being saved as a model file.
+- Hugging Face URLs (`erax_v1_1.pt`, SAM2) confirmed working; no URL change needed.
+
+**P1 — model validity in doctor (`doctor.py`)**
+- Added `_check_model_file(path)` helper: returns `(exists, valid)`.
+  A file is invalid if it is < 1 KB or begins with HTML signature bytes.
+- `doctor` now reports `"exists": exists and valid` and includes a `"valid"` field.
+  An HTML-corrupted model file is now reported as missing, not available.
+
+**P2 — doctor refresh on fetch failure (`App.tsx`)**
+- When a `fetch_models` job ends in a terminal failure state, `runDoctor()` is now
+  called so the UI reflects whatever partial progress occurred.
+
+### Files changed
+- `apps/backend/src/auto_mosaic/infra/ai/model_catalog.py`
+- `apps/backend/src/auto_mosaic/api/commands/fetch_models.py`
+- `apps/backend/src/auto_mosaic/api/commands/doctor.py`
+- `apps/desktop/src/App.tsx`
+- `apps/desktop/src-tauri/resources/review-runtime/…` (re-synced via `review:runtime`)
+
+## What Was Fixed In The Previous Pass
+- Reintegrated the remaining editor surfaces into the recovered shell:
+  - `apps/desktop/src/components/CanvasStagePanel.tsx`
+  - `apps/desktop/src/components/KeyframeDetailPanel.tsx`
+- Rebuilt `apps/desktop/src/App.tsx` as clean UTF-8 source after partial patching hit Windows command-length limits.
+- Restored timeline, canvas, track detail, and keyframe detail to a shared selection model.
+- Kept job responsibilities split out of `App.tsx`.
+- Fixed a backend runtime-job cancellation race so stale `cancelling` jobs do not block progress forever.
+
+## Current Frontend Shape
+- `App.tsx` is a shell responsible for:
+  - project open/save/new
+  - preview source setup
+  - selection coordination
+  - shared job launch and polling
+  - high-level activity/error status
+- The four editor faces are now present together again:
+  - timeline: `TimelineView.tsx`
+  - canvas: `CanvasStagePanel.tsx`
+  - track detail: `TrackDetailPanel.tsx`
+  - keyframe detail: `KeyframeDetailPanel.tsx`
+
+## Current Job UX Behavior
+- The Job Panel is still the common progress surface.
+- Runtime jobs, detect jobs, and export all appear in the same panel.
+- Cancel is request-based.
+- Runtime-job cancel avoids overwriting already-terminal states.
+- `fetch_models` failure now also triggers `runDoctor()` so the model panel refreshes.
+
+## Verified
+- `npm.cmd run build` in `apps/desktop`: passed (April 8 2026)
+- `npm.cmd run check:mojibake` in `apps/desktop`: passed
+- `npm.cmd test` in `apps/desktop`: passed (`21/21`)
+- `python -m pytest tests\\test_cli_smoke.py` in `apps/backend`: passed (`62 passed`)
+- `cargo check` in `apps/desktop/src-tauri`: passed
+- `npm.cmd run review:runtime`: synced all Python changes to resources review-runtime
+- `_check_model_file` unit tests (HTML/tiny/real/missing): all 4 cases pass
+- GitHub API URLs for 320n.onnx and 640m.onnx confirmed reachable and returning
+  `application/octet-stream` (12 MB and 103 MB respectively)
+- Hugging Face URLs for erax, SAM2 confirmed reachable
+- ONNX protobuf first-byte set manually verified against ModelProto field encoding rules
+- 320n.onnx size (12150158) and SHA-256 verified from prior download
+
+## Not Fully Verified
+- Manual interactive UI flow in the Tauri window (open video → detect → edit on canvas → save/load → export) has not been driven end-to-end by a human in the Tauri window.
+- GPU/CUDA path in the review-runtime was not exercised.
+- Actual end-to-end model download (320n.onnx via new API URL, through Tauri → Python worker) has not been driven in a Tauri window session.
+
+## Known Risks
+- GitHub API asset IDs (176831997, 176832019) are stable for existing releases but
+  will break if NudeNet publishes a new release and deprecates v3.4-weights. When
+  that happens, update `model_catalog.py` with new asset IDs and the new expected_size/expected_sha256.
+- `check:mojibake` is still a heuristic guard, not a full encoding validator.
+- The review-runtime prepare step must be re-run whenever backend Python files change.
+- SAM2, erax, and 640m.onnx have no expected_size/expected_sha256 in the catalog (values
+  were not available to hash locally). Doctor will still catch HTML/size/ONNX-magic corruption
+  for those files, but will not catch a byte-flipped binary of the correct size.
+- SHA-256 check reads the entire file on every `doctor` invocation. For 320n.onnx this is
+  ~12 MB — acceptable. If larger models gain hash entries in the future, consider caching
+  the validated state to avoid repeated reads.
+
+## Do Not Do
+- Do not restore the old corrupted `App.tsx`.
+- Do not reintroduce Japanese UI literals directly into giant JSX blocks.
+- Do not send `asset.localhost` URLs to the backend.
+- Do not put logs on backend `stdout`.
+- Do not bypass the shared job helpers for new long-running work.
+- Do not regress runtime-job cancel back into a state where terminal jobs can be overwritten to `cancelling`.
+- Do not ship a review build without re-running `npm.cmd run review:runtime` after any backend Python change.
+
+## Next Logical Step
+1. Drive the full interactive UI flow in the Tauri window (open video → detect → edit on canvas → save/load → export) to confirm the wiring end-to-end.
+2. Implement Persistent Mask Track (P0): extend track lifetime beyond detection span, allow editing outside detection frames, add hold/predict/interpolate shape resolution.
+3. Continue moving editor-specific orchestration out of `App.tsx` into small hooks or controller modules before adding more editing features.
+4. (Backlog) Add expected_size + expected_sha256 for 640m.onnx, SAM2, erax once those files are available to hash locally.

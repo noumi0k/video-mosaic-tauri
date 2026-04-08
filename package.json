@@ -1,0 +1,12 @@
+{
+  "name": "taurimozaic-workspace",
+  "private": true,
+  "version": "0.1.0",
+  "workspaces": [
+    "apps/desktop"
+  ],
+  "scripts": {
+    "desktop:dev": "npm --workspace apps/desktop run tauri dev",
+    "desktop:build": "npm --workspace apps/desktop run tauri build"
+  }
+}

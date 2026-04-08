@@ -1,0 +1,358 @@
+import React from "react";
+
+import {
+  buildDetectorOptionStatuses,
+  DETECTOR_CATEGORIES,
+  isCategorySupportedByBackend,
+  unsupportedCategoryReason,
+  type DetectorAvailability,
+  type DetectorBackendKey,
+  type DetectorCategoryKey,
+} from "../detectorCatalog";
+
+type Props = {
+  open: boolean;
+  selectedBackend: DetectorBackendKey;
+  selectedDevice: string;
+  threshold: number;
+  sampleEvery: number;
+  maxSamples: number;
+  inferenceResolution: number;
+  batchSize: number;
+  contourMode: string;
+  vramSavingMode: boolean;
+  selectedCategories: DetectorCategoryKey[];
+  availableModels: DetectorAvailability[];
+  requiredModels: DetectorAvailability[];
+  optionalModels: DetectorAvailability[];
+  hasCuda: boolean;
+  hasSam2: boolean;
+  onnxVersion: string | null;
+  modelFetchBusy: boolean;
+  eraxState: "missing" | "downloaded_pt" | "ready";
+  eraxConvertible: boolean;
+  eraxConvertBusy: boolean;
+  onSelectBackend: (value: DetectorBackendKey) => void;
+  onSelectDevice: (value: string) => void;
+  onThresholdChange: (value: number) => void;
+  onSampleEveryChange: (value: number) => void;
+  onMaxSamplesChange: (value: number) => void;
+  onInferenceResolutionChange: (value: number) => void;
+  onBatchSizeChange: (value: number) => void;
+  onContourModeChange: (value: string) => void;
+  onVramSavingModeChange: (value: boolean) => void;
+  onToggleCategory: (value: DetectorCategoryKey) => void;
+  onRun: () => void;
+  onFetchRequired: () => void;
+  onFetchErax: () => void;
+  onConvertErax: () => void;
+  onRecheck: () => void;
+  onClose: () => void;
+};
+
+export function DetectorSettingsModal(props: Props) {
+  if (!props.open) {
+    return null;
+  }
+
+  const detectorOptions = buildDetectorOptionStatuses(props.availableModels);
+  const selectedOption = detectorOptions.find((option) => option.key === props.selectedBackend) ?? detectorOptions[0];
+  const missingRequiredCount = props.requiredModels.filter((item) => !item.exists).length;
+  const missingOptionalCount = props.optionalModels.filter((item) => !item.exists).length;
+
+  return (
+    <div className="guard-modal-backdrop" role="presentation">
+      <section className="guard-modal detect-modal" role="dialog" aria-modal="true" aria-labelledby="detect-modal-title">
+        <p className="eyebrow">AI Detect</p>
+        <h2 id="detect-modal-title">検出設定</h2>
+
+        <div className="detect-modal__statusbar">
+          <div className={`detect-modal__status-chip detect-modal__status-chip--${props.hasCuda ? "ready" : "warning"}`}>
+            {props.hasCuda ? "GPU 利用可能 (CUDA)" : "CPU fallback"}
+          </div>
+          <div className={`detect-modal__status-chip detect-modal__status-chip--${missingRequiredCount === 0 ? "ready" : "warning"}`}>
+            必須モデル: {missingRequiredCount === 0 ? "OK" : `${missingRequiredCount} 件不足`}
+          </div>
+          <div className={`detect-modal__status-chip detect-modal__status-chip--${missingOptionalCount === 0 ? "neutral" : "warning"}`}>
+            追加モデル: {missingOptionalCount === 0 ? "OK" : `${missingOptionalCount} 件未取得`}
+          </div>
+          <div className={`detect-modal__status-chip detect-modal__status-chip--neutral`}>
+            SAM2: {props.hasSam2 ? "利用可能" : "未取得 (高精度輪郭のみ使用・任意)"}
+          </div>
+          {props.onnxVersion ? <div className="detect-modal__status-chip detect-modal__status-chip--neutral">ONNX Runtime {props.onnxVersion}</div> : null}
+        </div>
+
+        <div className="detect-modal__section">
+          <div className="detect-modal__section-header">
+            <span>実行デバイス</span>
+            <span className="detect-modal__section-note">GPU が使えない環境でも CPU で継続できます。</span>
+          </div>
+          <div className="detect-modal__device-grid">
+            <button
+              className={`detect-modal__choice ${props.selectedDevice === "auto" ? "detect-modal__choice--selected" : ""}`}
+              onClick={() => props.onSelectDevice("auto")}
+              type="button"
+            >
+              <strong>自動</strong>
+              <span>{props.hasCuda ? "CUDA を優先して自動選択" : "CPU で実行"}</span>
+            </button>
+            <button
+              className={`detect-modal__choice ${props.selectedDevice === "cuda" ? "detect-modal__choice--selected" : ""}`}
+              onClick={() => props.onSelectDevice("cuda")}
+              disabled={!props.hasCuda}
+              type="button"
+            >
+              <strong>CUDA</strong>
+              <span>{props.hasCuda ? "GPU で推論" : "この環境では利用不可"}</span>
+            </button>
+            <button
+              className={`detect-modal__choice ${props.selectedDevice === "cpu" ? "detect-modal__choice--selected" : ""}`}
+              onClick={() => props.onSelectDevice("cpu")}
+              type="button"
+            >
+              <strong>CPU</strong>
+              <span>安定優先で実行</span>
+            </button>
+          </div>
+        </div>
+
+        <div className="detect-modal__section">
+          <div className="detect-modal__section-header">
+            <span>検出モデル</span>
+            <span className="detect-modal__section-note">必須モデルと追加モデルを分けて表示します。</span>
+          </div>
+          <div className="detect-modal__model-groups">
+            <div className="detect-modal__model-group">
+              <div className="detect-modal__group-title">必須</div>
+              {detectorOptions.filter((item) => item.required).map((option) => (
+                <button
+                  key={option.key}
+                  className={`detect-modal__model-card ${props.selectedBackend === option.key ? "detect-modal__model-card--selected" : ""}`}
+                  onClick={() => props.onSelectBackend(option.key)}
+                  disabled={!option.available}
+                  type="button"
+                >
+                  <div className="detect-modal__model-topline">
+                    <strong>{option.title}</strong>
+                    <span className="detect-modal__model-state detect-modal__model-state--ready">
+                      {option.statusLabel}
+                    </span>
+                  </div>
+                  <div className="detect-modal__model-subline">{option.variant}</div>
+                  <div className="detect-modal__model-description">{option.reason}</div>
+                </button>
+              ))}
+            </div>
+            <div className="detect-modal__model-group">
+              <div className="detect-modal__group-title">任意</div>
+              {detectorOptions.filter((item) => !item.required).map((option) => {
+                const isErax = option.key === "erax_v1_1";
+                const eraxStatusLabel = isErax
+                  ? props.eraxState === "ready"
+                    ? "利用可能"
+                    : props.eraxState === "downloaded_pt"
+                    ? "PT 取得済み"
+                    : "未取得"
+                  : option.statusLabel;
+                const eraxStateClass = isErax
+                  ? props.eraxState === "ready"
+                    ? "ready"
+                    : "warning"
+                  : option.available
+                  ? "ready"
+                  : "warning";
+                return (
+                  <div key={option.key} className="detect-modal__model-card-wrap">
+                    <button
+                      className={`detect-modal__model-card ${props.selectedBackend === option.key ? "detect-modal__model-card--selected" : ""}`}
+                      onClick={() => props.onSelectBackend(option.key)}
+                      disabled={!option.available}
+                      type="button"
+                    >
+                      <div className="detect-modal__model-topline">
+                        <strong>{option.title}</strong>
+                        <span className={`detect-modal__model-state detect-modal__model-state--${eraxStateClass}`}>
+                          {eraxStatusLabel}
+                        </span>
+                      </div>
+                      <div className="detect-modal__model-subline">{option.variant}</div>
+                      <div className="detect-modal__model-description">{option.reason}</div>
+                    </button>
+                    {isErax && props.eraxState === "missing" ? (
+                      <button
+                        className="nle-btn nle-btn--sm"
+                        onClick={props.onFetchErax}
+                        disabled={props.modelFetchBusy}
+                        type="button"
+                      >
+                        PT を取得
+                      </button>
+                    ) : null}
+                    {isErax && props.eraxState === "downloaded_pt" ? (
+                      <>
+                        <button
+                          className="nle-btn nle-btn--sm nle-btn--gold"
+                          onClick={props.onConvertErax}
+                          disabled={!props.eraxConvertible || props.eraxConvertBusy}
+                          type="button"
+                        >
+                          {props.eraxConvertBusy ? "変換中…" : "ONNX に変換"}
+                        </button>
+                        {!props.eraxConvertible ? (
+                          <p className="detect-modal__inline-note">
+                            変換には ultralytics が必要です。<code>pip install ultralytics</code> を実行後、再チェックしてください。
+                          </p>
+                        ) : null}
+                      </>
+                    ) : null}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+          {!selectedOption.available ? (
+            <p className="detect-modal__warn">選択中のモデルは未取得です。近くの「不足モデルを取得」から必須モデルを取得してください。</p>
+          ) : null}
+        </div>
+
+        <div className="detect-modal__section">
+          <div className="detect-modal__section-header">
+            <span>検出パラメータ</span>
+            <span className="detect-modal__section-note">数値入力の並びと単位を揃えています。</span>
+          </div>
+          <div className="detect-modal__param-grid">
+            <label className="detect-modal__param-card">
+              <span>検出間隔</span>
+              <div className="detect-modal__param-input">
+                <input type="number" min={1} max={30} value={props.sampleEvery} onChange={(event) => props.onSampleEveryChange(Math.max(1, Math.min(30, event.currentTarget.valueAsNumber || 1)))} />
+                <em>frame</em>
+              </div>
+            </label>
+            <label className="detect-modal__param-card">
+              <span>最大サンプル数</span>
+              <div className="detect-modal__param-input">
+                <input type="number" min={10} max={9999} value={props.maxSamples} onChange={(event) => props.onMaxSamplesChange(Math.max(10, Math.min(9999, event.currentTarget.valueAsNumber || 120)))} />
+                <em>frames</em>
+              </div>
+            </label>
+            <label className="detect-modal__param-card">
+              <span>推論解像度</span>
+              <div className="detect-modal__param-input">
+                <select value={props.inferenceResolution} onChange={(event) => props.onInferenceResolutionChange(Number(event.currentTarget.value))}>
+                  <option value={320}>320</option>
+                  <option value={640}>640</option>
+                </select>
+                <em>px</em>
+              </div>
+            </label>
+            <label className="detect-modal__param-card">
+              <span>バッチサイズ</span>
+              <div className="detect-modal__param-input">
+                <input type="number" min={1} max={16} value={props.batchSize} onChange={(event) => props.onBatchSizeChange(Math.max(1, Math.min(16, event.currentTarget.valueAsNumber || 1)))} />
+                <em>items</em>
+              </div>
+            </label>
+            <label className="detect-modal__param-card detect-modal__param-card--wide">
+              <span>閾値</span>
+              <div className="detect-modal__threshold">
+                <input type="range" min={0.1} max={0.9} step={0.01} value={props.threshold} onChange={(event) => props.onThresholdChange(parseFloat(event.currentTarget.value))} />
+                <strong>{props.threshold.toFixed(2)}</strong>
+              </div>
+            </label>
+          </div>
+        </div>
+
+        <div className="detect-modal__section">
+          <div className="detect-modal__section-header">
+            <span>検出対象カテゴリ</span>
+            <span className="detect-modal__section-note">クリック領域を広くして 2 列グリッドで整理しています。</span>
+          </div>
+          <div className="detect-modal__categories-grid">
+            {DETECTOR_CATEGORIES.map((category) => {
+              const supported = isCategorySupportedByBackend(props.selectedBackend, category.key);
+              const checked = supported && props.selectedCategories.includes(category.key);
+              const rowClass = [
+                "detect-modal__category-row",
+                checked ? "detect-modal__category-row--selected" : "",
+                supported ? "" : "detect-modal__category-row--disabled",
+              ]
+                .filter(Boolean)
+                .join(" ");
+              const description = supported
+                ? category.description
+                : unsupportedCategoryReason(props.selectedBackend);
+              return (
+                <label key={category.key} className={rowClass} aria-disabled={!supported}>
+                  <input
+                    type="checkbox"
+                    checked={checked}
+                    disabled={!supported}
+                    onChange={() => {
+                      if (supported) props.onToggleCategory(category.key);
+                    }}
+                  />
+                  <span className="detect-modal__category-copy">
+                    <strong>{category.label}</strong>
+                    <em>{description}</em>
+                  </span>
+                </label>
+              );
+            })}
+          </div>
+        </div>
+
+        <div className="detect-modal__section">
+          <div className="detect-modal__section-header">
+            <span>輪郭モード</span>
+            <span className="detect-modal__section-note">速度・見た目・追加モデル要否で選べます。</span>
+          </div>
+          <div className="detect-modal__param-grid">
+            <label className="detect-modal__param-card detect-modal__param-card--wide">
+              <span>輪郭モード</span>
+              <div className="detect-modal__param-input">
+                <select value={props.contourMode} onChange={(event) => props.onContourModeChange(event.currentTarget.value)}>
+                  {/* P2: plain-language labels. The internal keys
+                      (none/fast/balanced/quality) are kept so existing
+                      backend pipelines don't need to change. */}
+                  <option value="none">枠のみ(最速) — 輪郭抽出なし</option>
+                  <option value="fast">軽量輪郭(速い) — ざっくり、細部は崩れやすい</option>
+                  <option value="balanced">標準輪郭(普段使い) — 速度と形の安定性のバランス</option>
+                  <option value="quality">高精度輪郭(遅い / SAM2 使用)</option>
+                </select>
+                <em>mode</em>
+              </div>
+            </label>
+            <p className="detect-modal__section-note detect-modal__section-note--hint">
+              輪郭抽出に失敗した場合は自動で枠ベースに戻ります。高精度輪郭は検出器ではなく輪郭補助モデルです。
+            </p>
+            <label className="detect-modal__toggle-row">
+              <input type="checkbox" checked={props.vramSavingMode} onChange={(event) => props.onVramSavingModeChange(event.currentTarget.checked)} />
+              <span>VRAM 節約モード</span>
+            </label>
+          </div>
+        </div>
+
+        <div className="detect-modal__section detect-modal__section--actions">
+          <div className="detect-modal__section-header">
+            <span>実行アクション</span>
+            <span className="detect-modal__section-note">不足時は取得と再チェックへすぐ進めます。</span>
+          </div>
+          <div className="guard-modal__actions detect-modal__actions">
+            <button className="nle-btn nle-btn--accent" onClick={props.onRun} disabled={!selectedOption.available}>
+              検出開始
+            </button>
+            <button className="nle-btn nle-btn--gold" onClick={props.onFetchRequired} disabled={props.modelFetchBusy}>
+              不足モデルを取得
+            </button>
+            <button className="nle-btn" onClick={props.onRecheck}>
+              再チェック
+            </button>
+            <button className="nle-btn" onClick={props.onClose}>
+              閉じる
+            </button>
+          </div>
+        </div>
+      </section>
+    </div>
+  );
+}

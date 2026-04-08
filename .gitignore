@@ -1,0 +1,100 @@
+# ============================================================
+# Auto Mosaic Tauri — .gitignore
+# ============================================================
+
+# ---- Rust / Cargo ----
+# Tauri の build 成果物。review-runtime のコピーも target/ 内に作られるので
+# これだけで 9000 件超のノイズが消える。
+apps/desktop/src-tauri/target/
+**/*.rs.bk
+*.pdb
+*.lib
+*.exp
+
+# Cargo.lock は track する (Tauri デスクトップアプリは再現性のため lock を残す)
+# → 旧 .gitignore の "Cargo.lock" 行は意図的に削除
+
+# ---- Tauri auto-generated ----
+apps/desktop/src-tauri/gen/schemas/
+
+# ---- Tauri review-runtime synced resources (派生物) ----
+# .gitignore と README.txt は track するため、Lib/DLLs などをピンポイントで除外
+apps/desktop/src-tauri/resources/review-runtime/python/
+apps/desktop/src-tauri/resources/review-runtime/backend/
+apps/desktop/src-tauri/resources/review-runtime/ffmpeg/
+
+# ---- Node ----
+node_modules/
+dist/
+.dist/
+*.tsbuildinfo
+pnpm-lock.yaml
+
+# ---- Python ----
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+.pytest_cache/
+.venv/
+venv/
+
+# ---- Vendored Python deps (pip で再取得可) ----
+apps/backend/vendor/
+
+# ---- Review package outputs ----
+AutoMosaic-Review/
+AutoMosaic-Review.zip
+AutoMosaic-Review-*.zip
+apps/desktop/review-package/
+
+# ---- Bundled Python runtime / DLLs (review-runtime 配下に出てくる) ----
+**/python/Lib/
+**/python/DLLs/
+**/python.exe
+**/pythonw.exe
+**/python3*.dll
+**/vcruntime*.dll
+
+# ---- ML models (大容量) ----
+models/
+*.onnx
+*.pt
+*.safetensors
+
+# ---- FFmpeg bundled binaries ----
+tools/ffmpeg/bin/*.exe
+tools/ffmpeg/bin/ffmpeg
+tools/ffmpeg/bin/ffprobe
+
+# ---- User data / scratch ----
+user-data/
+apps/user-data/
+
+# ---- Media (テスト動画含む) ----
+*.mp4
+*.mov
+*.mkv
+*.avi
+
+# ---- Environment ----
+.env
+.env.local
+.env.*.local
+
+# ---- IDE / OS ----
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# ---- Misc build artifacts ----
+*.o
+*.so
+*.dylib
+
+# ---- Recovery artifacts (this session) ----
+.git.broken-backup/
+.gitignore.old

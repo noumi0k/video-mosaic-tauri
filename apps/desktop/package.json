@@ -1,0 +1,33 @@
+{
+  "name": "taurimozaic-desktop",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "check:mojibake": "node scripts/check-mojibake.mjs",
+    "test": "node --test --experimental-strip-types tests/*.test.ts",
+    "test:state": "node --test --experimental-strip-types tests/saveWorkflow.test.ts",
+    "preview": "vite preview",
+    "tauri": "tauri",
+    "review:runtime": "powershell -ExecutionPolicy Bypass -File ..\\..\\scripts\\prepare-review-runtime.ps1",
+    "review:bundle": "npm.cmd run review:runtime && tauri build",
+    "review:portable": "npm.cmd run review:runtime && npm.cmd exec -- tauri build --no-bundle --ci && powershell -ExecutionPolicy Bypass -File ..\\..\\scripts\\assemble-review-package.ps1",
+    "review:zip": "npm.cmd run review:portable && powershell -ExecutionPolicy Bypass -File ..\\..\\scripts\\package-review-zip.ps1"
+  },
+  "dependencies": {
+    "@tauri-apps/api": "^2.8.0",
+    "@tauri-apps/plugin-dialog": "^2.4.0",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.8.0",
+    "@types/react": "^19.1.2",
+    "@types/react-dom": "^19.1.2",
+    "@vitejs/plugin-react": "^5.0.4",
+    "typescript": "^5.9.2",
+    "vite": "^7.1.7"
+  }
+}
