@@ -98,3 +98,5 @@ Thumbs.db
 # ---- Recovery artifacts (this session) ----
 .git.broken-backup/
 .gitignore.old
+
+.claude/
