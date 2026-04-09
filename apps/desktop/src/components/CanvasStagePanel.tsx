@@ -15,8 +15,10 @@ import {
   type NormalizedPoint,
   type ResizeHandle,
 } from "../ellipseCanvasMath";
+import type { ResolveReason } from "../maskShapeResolver";
 import type { Keyframe, KeyframeSummary, TrackSummary, UpdateKeyframePayload, VideoMetadata } from "../types";
 import { applyKeyframePatchPreview } from "../keyframePreview";
+import { resolveOverlayLabel } from "../keyframeResolveDisplay";
 
 type DragState =
   | { mode: "move-ellipse"; originX: number; originY: number; startBBox: NormalizedBBox }
@@ -29,6 +31,8 @@ type CanvasStagePanelProps = {
   track: TrackSummary | null;
   keyframe: KeyframeSummary | null;
   keyframeDocument: Keyframe | null;
+  /** W9: resolve reason for the current frame — threaded for future badge UI. */
+  resolvedReason?: ResolveReason | null;
   busy: boolean;
   remoteError: string;
   onPreviewKeyframeChange: (keyframe: Keyframe | null) => void;
@@ -45,6 +49,7 @@ export function CanvasStagePanel({
   track,
   keyframe,
   keyframeDocument,
+  resolvedReason,
   busy,
   remoteError,
   onPreviewKeyframeChange,
@@ -297,6 +302,12 @@ export function CanvasStagePanel({
         style={{ aspectRatio: `${video.width} / ${video.height}`, maxWidth: "100%", maxHeight: "100%" }}
       >
         <div className="canvas-stage__backdrop" />
+        {/* Resolve-state overlay badge — top-right, pointer-events:none inherited */}
+        {keyframeDocument !== null && resolveOverlayLabel(resolvedReason, keyframeDocument.source_detail) !== null ? (
+          <div className="canvas-stage__resolve-badge">
+            {resolveOverlayLabel(resolvedReason, keyframeDocument.source_detail)}
+          </div>
+        ) : null}
         {activePoints?.length ? (
           <svg className="canvas-stage__svg" viewBox="0 0 1 1" preserveAspectRatio="none">
             <polygon

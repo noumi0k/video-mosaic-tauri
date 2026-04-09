@@ -32,7 +32,8 @@ import { normalizeDetectJob, normalizeExportJob, normalizeRuntimeJob, sortJobs }
 import {
   findExplicitKeyframeSummary,
   planCommitMutation,
-  resolveShapeForEditing,
+  resolveForEditing,
+  type ResolveReason,
 } from "./maskShapeResolver";
 import { assertRawFilePathForBackend } from "./pathUtils";
 import { uiText } from "./uiText";
@@ -695,10 +696,14 @@ export function App() {
   // (the playhead), not from selectedKeyframeFrame (the sticky timeline marker).
   // selectedKeyframeFrame remains valid for highlighting markers and for
   // delete/move operations against an explicitly clicked keyframe.
-  const resolvedKeyframeDocument = useMemo(
-    () => resolveShapeForEditing(selectedTrackDocument?.keyframes ?? [], currentFrame),
+  // W9: resolveForEditing returns { keyframe, reason } | null.
+  // reason is carried through state for future UI use (not yet rendered).
+  const _resolvedForEditing = useMemo(
+    () => resolveForEditing(selectedTrackDocument?.keyframes ?? [], currentFrame),
     [selectedTrackDocument, currentFrame],
   );
+  const resolvedKeyframeDocument = _resolvedForEditing?.keyframe ?? null;
+  const resolvedReason: ResolveReason | null = _resolvedForEditing?.reason ?? null;
   const commitPlan = useMemo(
     () => planCommitMutation(selectedTrackDocument?.keyframes ?? [], currentFrame),
     [selectedTrackDocument, currentFrame],
@@ -903,6 +908,7 @@ export function App() {
                   track={selectedTrack}
                   keyframe={currentFrameKeyframeSummary}
                   keyframeDocument={displayedKeyframeDocument}
+                  resolvedReason={resolvedReason}
                   busy={keyframeEditorBusy}
                   remoteError={keyframeRemoteError}
                   onPreviewKeyframeChange={setPreviewKeyframeOverride}
@@ -982,6 +988,7 @@ export function App() {
                 track={selectedTrack}
                 keyframe={currentFrameKeyframeSummary}
                 keyframeDocument={displayedKeyframeDocument}
+                resolvedReason={resolvedReason}
                 suggestedCreateFrame={suggestedCreateFrame}
                 onCreateKeyframe={(payload) => handleCreateKeyframe(payload)}
                 onDeleteKeyframe={() => void handleDeleteKeyframe()}
@@ -999,6 +1006,7 @@ export function App() {
       <section className="nle-timeline">
         <TimelineView
           readModel={readModel}
+          tracks={project?.tracks ?? null}
           selectedTrackId={selectedTrackId}
           selectedKeyframeFrame={selectedKeyframeFrame}
           currentFrame={currentFrame}

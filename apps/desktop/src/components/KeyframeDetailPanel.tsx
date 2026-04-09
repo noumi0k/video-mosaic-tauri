@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import type { ResolveReason } from "../maskShapeResolver";
 import type {
   CreateKeyframePayload,
   Keyframe,
@@ -18,11 +19,18 @@ import {
   type KeyframeInspectorFieldErrors,
   type KeyframeInspectorState,
 } from "../keyframeInspector";
+import {
+  resolveReasonBadgeVariant,
+  resolveReasonLabel,
+  sourceDetailLabel,
+} from "../keyframeResolveDisplay";
 
 type KeyframeDetailPanelProps = {
   track: TrackSummary | null;
   keyframe: KeyframeSummary | null;
   keyframeDocument: Keyframe | null;
+  /** W9: resolve reason for the current frame — threaded for future badge UI. */
+  resolvedReason?: ResolveReason | null;
   suggestedCreateFrame: number;
   onCreateKeyframe: (payload: Omit<CreateKeyframePayload, "project_path" | "track_id">) => Promise<void>;
   onDeleteKeyframe: () => void;
@@ -37,6 +45,7 @@ export function KeyframeDetailPanel({
   track,
   keyframe,
   keyframeDocument,
+  resolvedReason,
   suggestedCreateFrame,
   onCreateKeyframe,
   onDeleteKeyframe,
@@ -189,17 +198,29 @@ export function KeyframeDetailPanel({
   }
 
   if (!keyframe && keyframeDocument) {
-    // Resolved (held) shape: there is no explicit keyframe at the selected frame,
-    // but the resolved shape from a prior keyframe is displayed for editing.
+    // Resolved (held or interpolated) shape: no explicit keyframe at current frame,
+    // but a prior/interpolated shape is displayed for editing.
     // Saving creates a new keyframe at currentFrame (handled by App.tsx).
+    const reasonVariant = resolveReasonBadgeVariant(resolvedReason);
+    const reasonText = resolveReasonLabel(resolvedReason) ?? "held";
+    const sdLabel = sourceDetailLabel(keyframeDocument.source_detail);
     return (
       <div>
-        <div style={{ marginBottom: 6, display: "flex", gap: 6, alignItems: "center" }}>
+        <div style={{ marginBottom: 4, display: "flex", gap: 6, alignItems: "center" }}>
           <span className="nle-mode-badge nle-mode-badge--update">EDIT</span>
-          <span style={{ fontSize: 11, color: "var(--text-dim)" }}>
-            ← F{keyframeDocument.frame_index} (held)
-          </span>
+          <span className={`nle-mode-badge nle-mode-badge--${reasonVariant}`}>{reasonText}</span>
+          {resolvedReason !== "interpolated" && (
+            <span style={{ fontSize: 11, color: "var(--text-dim)" }}>
+              ← F{keyframeDocument.frame_index}
+            </span>
+          )}
         </div>
+        {sdLabel !== null && (
+          <div className="nle-resolve-info">
+            <span className="nle-resolve-info__label">source_detail</span>
+            <span className="nle-resolve-info__value">{sdLabel}</span>
+          </div>
+        )}
         {renderInspectorFields("update")}
         <div style={{ marginTop: 8, display: "flex", gap: 4 }}>
           <button className="nle-btn nle-btn--small nle-btn--accent" onClick={() => void handleSave()} disabled={saving || busy}>
@@ -226,14 +247,22 @@ export function KeyframeDetailPanel({
     );
   }
 
+  const sdLabel = sourceDetailLabel(keyframeDocument?.source_detail);
   return (
     <div>
-      <div style={{ marginBottom: 6, display: "flex", gap: 6, alignItems: "center" }}>
+      <div style={{ marginBottom: 4, display: "flex", gap: 6, alignItems: "center" }}>
         <span className="nle-mode-badge nle-mode-badge--update">EDIT</span>
+        <span className="nle-mode-badge nle-mode-badge--explicit">explicit</span>
         <span style={{ fontSize: 11, color: "var(--text-dim)" }}>
           F{keyframe.frame_index} / {keyframe.shape_type} / {keyframe.source}
         </span>
       </div>
+      {sdLabel !== null && (
+        <div className="nle-resolve-info">
+          <span className="nle-resolve-info__label">source_detail</span>
+          <span className="nle-resolve-info__value">{sdLabel}</span>
+        </div>
+      )}
       {renderInspectorFields("update")}
       <div style={{ marginTop: 8, display: "flex", gap: 4, flexWrap: "wrap" }}>
         <button className="nle-btn nle-btn--small nle-btn--accent" onClick={() => void handleSave()} disabled={saving || busy}>

@@ -751,6 +751,25 @@ body,
   font-weight: 600;
 }
 
+/* Resolve-state badge: top-right, non-interactive, subtle */
+.canvas-stage__resolve-badge {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 4;
+  pointer-events: none;
+  user-select: none;
+  font-size: 10px;
+  font-family: var(--mono);
+  color: var(--text-dim);
+  background: rgba(0, 0, 0, 0.5);
+  border-radius: var(--radius-sm);
+  padding: 2px 6px;
+  white-space: nowrap;
+  letter-spacing: 0.02em;
+  opacity: 0.85;
+}
+
 .canvas-stage__vertex-layer,
 .canvas-stage__edge-layer {
   position: absolute;
@@ -956,6 +975,40 @@ body,
 .nle-mode-badge--update {
   background: var(--accent-dim);
   color: var(--accent);
+}
+
+.nle-mode-badge--explicit {
+  background: var(--green-dim);
+  color: var(--green);
+}
+
+.nle-mode-badge--held {
+  background: transparent;
+  color: var(--text-secondary);
+  border: 1px solid var(--border);
+}
+
+.nle-mode-badge--interpolated {
+  background: var(--orange-dim);
+  color: var(--orange);
+}
+
+/* --- Resolve/source-detail info row (below badge row, above inspector fields) --- */
+.nle-resolve-info {
+  display: flex;
+  justify-content: space-between;
+  padding: 0 0 4px;
+  font-size: 11px;
+}
+
+.nle-resolve-info__label {
+  color: var(--text-dim);
+}
+
+.nle-resolve-info__value {
+  color: var(--text-secondary);
+  font-family: var(--mono);
+  font-size: 10px;
 }
 
 /* --- Keyframe list in inspector --- */
@@ -1904,11 +1957,30 @@ button {
 /* ============================================================
    TIMELINE KF COLOR CLASSES
    ============================================================ */
-.nle-tl-row__marker--manual       { background: #F59E0B; }
-.nle-tl-row__marker--auto         { background: #22C55E; }
-.nle-tl-row__marker--interpolated { background: #E0E0E0; }
-.nle-tl-row__marker--predicted    { background: #888888; }
-.nle-tl-row__marker--re-detected  { background: #3B82F6; }
+.nle-tl-row__marker--manual         { background: #F59E0B; }
+.nle-tl-row__marker--auto           { background: #22C55E; }
+/* detector_anchored: blue ring to distinguish from plain accepted */
+.nle-tl-row__marker--auto-anchored  { background: #3B82F6; box-shadow: 0 0 0 1px rgba(59,130,246,0.5); }
+.nle-tl-row__marker--interpolated   { background: #E0E0E0; }
+.nle-tl-row__marker--predicted      { background: #888888; }
+.nle-tl-row__marker--re-detected    { background: #3B82F6; }
+
+/* ============================================================
+   TIMELINE SEGMENT BARS
+   ============================================================ */
+.nle-tl-seg {
+  position: absolute;
+  top: 3px;
+  bottom: 3px;
+  border-radius: 2px;
+  pointer-events: none;
+}
+.nle-tl-seg--confirmed    { background: var(--accent); opacity: 0.65; }
+.nle-tl-seg--held         { background: #4B5563; opacity: 0.8; }
+.nle-tl-seg--uncertain    { background: #D97706; opacity: 0.75; }
+.nle-tl-seg--interpolated { background: #7C3AED; opacity: 0.75; }
+.nle-tl-seg--predicted    { background: #3B82F6; opacity: 0.55; }
+.nle-tl-seg--hidden       { opacity: 0.25 !important; }
 
 /* ============================================================
    TIMELINE LEGEND
@@ -1916,12 +1988,22 @@ button {
 .nle-tl-legend {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 8px;
   padding: 4px 10px;
   background: var(--bg-header);
   border-top: 1px solid var(--border);
   flex-shrink: 0;
   font-size: 10px;
+  flex-wrap: wrap;
+}
+
+.nle-tl-legend__separator {
+  color: var(--text-dim);
+  opacity: 0.5;
+  padding-left: 4px;
+}
+.nle-tl-legend__separator:first-child {
+  padding-left: 0;
 }
 
 .nle-tl-legend__item {
@@ -1940,11 +2022,19 @@ button {
   background: currentColor;
 }
 
-.nle-tl-legend__item--manual       { color: #F59E0B; }
-.nle-tl-legend__item--auto         { color: #22C55E; }
-.nle-tl-legend__item--interpolated { color: #E0E0E0; }
-.nle-tl-legend__item--predicted    { color: #888888; }
-.nle-tl-legend__item--re-detected  { color: #3B82F6; }
+/* KF marker legend */
+.nle-tl-legend__item--manual         { color: #F59E0B; }
+.nle-tl-legend__item--auto           { color: #22C55E; }
+.nle-tl-legend__item--auto-anchored  { color: #3B82F6; }
+.nle-tl-legend__item--interpolated   { color: #E0E0E0; }
+.nle-tl-legend__item--predicted      { color: #888888; }
+.nle-tl-legend__item--re-detected    { color: #3B82F6; }
+
+/* Segment state legend */
+.nle-tl-legend__item--seg-confirmed    { color: var(--accent); }
+.nle-tl-legend__item--seg-held         { color: #4B5563; }
+.nle-tl-legend__item--seg-uncertain    { color: #D97706; }
+.nle-tl-legend__item--seg-interpolated { color: #7C3AED; }
 
 /* ============================================================
    DETECT MODAL (AI検出設定)

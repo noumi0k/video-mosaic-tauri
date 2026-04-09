@@ -1,8 +1,11 @@
 import { useRef, useState } from "react";
-import type { ProjectReadModel } from "../types";
+import type { MaskTrack, ProjectReadModel } from "../types";
+import { segmentBarClass, kfMarkerClassFull } from "../timelineSegmentDisplay";
 
 type TimelineViewProps = {
   readModel: ProjectReadModel | null;
+  /** Full track documents — provides segments and source_detail for visualization. */
+  tracks?: MaskTrack[] | null;
   selectedTrackId: string | null;
   selectedKeyframeFrame: number | null;
   currentFrame: number;
@@ -38,24 +41,10 @@ function generateTicks(totalFrames: number): Array<{ frame: number; label: strin
   return ticks;
 }
 
-function kfMarkerClass(source: string): string {
-  switch (source) {
-    case "manual":
-      return "nle-tl-row__marker--manual";
-    case "detector":
-    case "auto":
-      return "nle-tl-row__marker--auto";
-    case "interpolated":
-      return "nle-tl-row__marker--interpolated";
-    case "predicted":
-      return "nle-tl-row__marker--predicted";
-    default:
-      return "";
-  }
-}
 
 export function TimelineView({
   readModel,
+  tracks,
   selectedTrackId,
   selectedKeyframeFrame,
   currentFrame,
@@ -68,6 +57,12 @@ export function TimelineView({
   const [zoom, setZoom] = useState(1);
   const bodyRef = useRef<HTMLDivElement>(null);
   const rulerScrollRef = useRef<HTMLDivElement>(null);
+
+  // Build a fast lookup from track_id → MaskTrack for segment/source_detail access.
+  const tracksMap = new Map<string, MaskTrack>();
+  if (tracks) {
+    for (const t of tracks) tracksMap.set(t.track_id, t);
+  }
 
   const totalFrames = readModel?.video?.frame_count ?? 0;
   const fps = readModel?.video?.fps ?? 0;
@@ -251,29 +246,52 @@ export function TimelineView({
                     className="nle-tl-row__lane"
                     onClick={(e) => handleLaneClick(e, track.track_id)}
                   >
-                    {/* Active range bar */}
-                    {hasRange && (
-                      <div
-                        className={`nle-tl-row__bar${!track.visible ? " nle-tl-row__bar--hidden" : ""}`}
-                        style={{ left: barLeft, width: barWidth }}
-                      />
-                    )}
+                    {(() => {
+                      const trackDoc = tracksMap.get(track.track_id);
+                      const segs = trackDoc?.segments;
+                      if (segs && segs.length > 0) {
+                        // Segment-colored bars replace the single active-range bar.
+                        return segs.map((seg, i) => {
+                          const segLeft = framePct(seg.start_frame);
+                          const segWidth = `${(Math.max(seg.end_frame - seg.start_frame + 1, 1) / Math.max(totalFrames, 1)) * 100}%`;
+                          return (
+                            <div
+                              key={i}
+                              className={`nle-tl-seg ${segmentBarClass(seg.state)}${!track.visible ? " nle-tl-seg--hidden" : ""}`}
+                              style={{ left: segLeft, width: segWidth }}
+                              title={seg.state}
+                            />
+                          );
+                        });
+                      }
+                      // Fallback: single bar for legacy / no-segment tracks.
+                      return hasRange ? (
+                        <div
+                          className={`nle-tl-row__bar${!track.visible ? " nle-tl-row__bar--hidden" : ""}`}
+                          style={{ left: barLeft, width: barWidth }}
+                        />
+                      ) : null;
+                    })()}
 
-                    {/* Keyframe markers */}
+                    {/* Keyframe markers — use source_detail when available */}
                     {track.keyframes.map((kf) => {
                       const isSelKf = selected && selectedKeyframeFrame === kf.frame_index;
+                      const trackDoc = tracksMap.get(track.track_id);
+                      const fullKf = trackDoc?.keyframes.find((k) => k.frame_index === kf.frame_index);
+                      const markerClass = kfMarkerClassFull(kf.source, fullKf?.source_detail);
+                      const detailHint = fullKf?.source_detail ? ` | ${fullKf.source_detail}` : "";
                       return (
                         <div
                           key={kf.frame_index}
                           className={[
                             "nle-tl-row__marker",
-                            kfMarkerClass(kf.source),
+                            markerClass,
                             isSelKf ? "nle-tl-row__marker--selected" : "",
                           ]
                             .filter(Boolean)
                             .join(" ")}
                           style={{ left: framePct(kf.frame_index) }}
-                          title={`F${kf.frame_index} | ${kf.shape_type} | ${kf.source}`}
+                          title={`F${kf.frame_index} | ${kf.shape_type} | ${kf.source}${detailHint}`}
                           onClick={(e) => {
                             e.stopPropagation();
                             onSelectKeyframe(track.track_id, kf.frame_index);
@@ -298,10 +316,15 @@ export function TimelineView({
 
       {/* ── Legend ── */}
       <div className="nle-tl-legend">
+        <span className="nle-tl-legend__separator">KF:</span>
         <span className="nle-tl-legend__item nle-tl-legend__item--manual">手動</span>
-        <span className="nle-tl-legend__item nle-tl-legend__item--auto">自動検出</span>
-        <span className="nle-tl-legend__item nle-tl-legend__item--interpolated">補間</span>
-        <span className="nle-tl-legend__item nle-tl-legend__item--predicted">予測</span>
+        <span className="nle-tl-legend__item nle-tl-legend__item--auto">自動</span>
+        <span className="nle-tl-legend__item nle-tl-legend__item--auto-anchored">anchored</span>
+        <span className="nle-tl-legend__separator">セグメント:</span>
+        <span className="nle-tl-legend__item nle-tl-legend__item--seg-confirmed">確定</span>
+        <span className="nle-tl-legend__item nle-tl-legend__item--seg-held">held</span>
+        <span className="nle-tl-legend__item nle-tl-legend__item--seg-uncertain">uncertain</span>
+        <span className="nle-tl-legend__item nle-tl-legend__item--seg-interpolated">補間</span>
       </div>
     </div>
   );

@@ -42,6 +42,8 @@ export type Keyframe = {
   feather: number | null;
   is_locked: boolean;
   contour_points: number[][];
+  /** Optional — absent in legacy payloads (undefined/null both treated as absent). */
+  source_detail?: string | null;
 };
 
 export type MaskSegment = {
