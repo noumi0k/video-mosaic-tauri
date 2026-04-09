@@ -11,6 +11,61 @@
 - Current backend smoke status on April 8, 2026: `python -m pytest tests\\test_cli_smoke.py` in `apps/backend` passed with `62 passed`.
 - Current backend integrity test status on April 9, 2026: `python -m pytest tests/test_model_integrity.py` passed with `25/25`.
 
+## What Was Fixed In This Pass (April 9, 2026 — Python ABI mismatch in review-runtime)
+
+### 症状
+model integrity 修正 (コミット `fa4c4e3`) 適用後にも関わらず、review package で detect を実行すると再び `Detection worker was no longer running and the job was marked interrupted.` が発生。
+
+### 真因
+model 破損でも同期不良でもなく、**review-runtime の Python と vendor packages の ABI mismatch**:
+
+- `review-runtime/python/` に Python **3.14** がコピーされていた
+- `review-runtime/backend/vendor/` は numpy 2.4.4 / onnxruntime-gpu 1.24.4 が **cp312 ABI** (Python 3.12 専用)
+- detect worker が `bootstrap_backend_environment()` → `import numpy` の時点で `ImportError`
+- worker プロセスが failed status を書き出す前に即死
+- `reconcile_job_state()` が worker PID dead を検出し "interrupted" 判定
+
+### 発生経緯
+- `prepare-review-runtime.ps1` は `python -c "sys.executable"` でシステム Python を使っていた
+- 開発機のシステム Python が 3.12 → 3.14 にアップグレードされた際、script は黙って 3.14 をコピーした
+- vendor (cp312) と Python (3.14) が矛盾したまま review-runtime が生成された
+- vendor ABI 整合性の検証機構が無かったため、silent failure として発覚が遅れた
+
+### 恒久対策 — `scripts/prepare-review-runtime.ps1`
+
+#### 1. ABI-driven Python selection
+vendor 内の `*.cp3XX-win_amd64.pyd` ファイル名から ABI (`cp312` など) を検出し、それに合致する Python minor バージョン (`3.12`) を自動選択。
+
+#### 2. Python 解決優先順位
+1. `$env:AUTO_MOSAIC_REVIEW_PYTHON` (明示的 override)
+2. `py.exe -<target minor>` (py launcher)
+3. 標準インストール先 (`%LOCALAPPDATA%\Programs\Python\Python3XX\python.exe` など)
+4. PATH の `python`
+
+#### 3. ABI 整合性検証 (fail-fast)
+選択された Python の `sys.version_info.minor` と vendor ABI が一致しない場合、`throw` で**ディレクトリを削除する前に** preparation を中止。既存 review-runtime は保護される。
+
+#### 4. manifest 拡張
+`manifest.json` に次を追加:
+- `python_minor` — `"3.12"` など
+- `python_source` — 選択された python.exe の絶対パス
+- `vendor_abi` — `"cp312"` など
+- `abi_check_passed` — 常に `true` (失敗時は manifest が書き換えられない)
+
+### 検証
+- `vendor_abi = cp312` を自動検出
+- py launcher 経由で `C:\Users\bbbtg\AppData\Local\Programs\Python\Python312\python.exe` を選択
+- ABI 整合性チェック通過
+- bootstrap → numpy/onnxruntime import → doctor 整合性チェック → 320n.onnx の InferenceSession 作成まで完全動作
+- `AUTO_MOSAIC_REVIEW_PYTHON` を Python 3.14 に強制指定したテスト: ディレクトリを消さずに `throw` で停止することを確認
+
+### Files changed
+- `scripts/prepare-review-runtime.ps1`
+- `apps/desktop/src-tauri/resources/review-runtime/` (regenerated with Python 3.12)
+- `AutoMosaic-Review/review-runtime/` (robocopy mirror of staging)
+
+---
+
 ## What Was Fixed In This Pass (April 9, 2026 — model integrity spec fixed)
 
 ### 結論
@@ -216,6 +271,8 @@ destination was silently corrupted:
 - Do not judge a model as installed by file existence alone — always use `_check_model_file` (integrity-based).
 - Do not promote a temp download file to its final name before `_verify_downloaded_file` passes.
 - Do not use `browser_download_url` as the download URL — always use `api.github.com/repos/…/assets/<ID>`.
+- Do not let `prepare-review-runtime.ps1` silently pick a Python whose minor version differs from the vendor ABI. The ABI check must remain fail-fast.
+- Do not hand-edit `review-runtime/python/` to swap interpreters without re-running the ABI check.
 
 ## Next Logical Step
 1. **Run `npm.cmd run review:runtime`** to sync the April 9 backend changes to `review-runtime`.

@@ -9,10 +9,168 @@ $backendRoot = Join-Path $repoRoot "apps\backend"
 $modelsRoot = Join-Path $repoRoot "models"
 $ffmpegRoot = Join-Path $repoRoot "tools\ffmpeg\bin"
 
-$pythonExe = & python -c "import sys; print(sys.executable)"
-if (-not $pythonExe) {
+# ---------------------------------------------------------------------------
+# Python selection
+#
+# Priority order:
+#   1. $env:AUTO_MOSAIC_REVIEW_PYTHON (explicit override — must point to
+#      an existing python.exe)
+#   2. py launcher (py -<target minor>)
+#   3. Common Python install locations for the target minor version
+#   4. Fallback: `python` on PATH
+#
+# The selected interpreter's minor version MUST match the ABI of the
+# packages in apps/backend/vendor/.  If it does not, preparation aborts
+# with a descriptive error.
+# ---------------------------------------------------------------------------
+
+function Test-PythonExe {
+  param([string]$Path)
+  if (-not $Path) { return $false }
+  if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { return $false }
+  return $true
+}
+
+function Get-PythonMinor {
+  param([string]$PythonExe)
+  $versionText = & $PythonExe -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')" 2>$null
+  if ($LASTEXITCODE -ne 0 -or -not $versionText) {
+    throw "Failed to query version from Python at: $PythonExe"
+  }
+  return $versionText.Trim()
+}
+
+function Get-VendorAbi {
+  param([string]$VendorRoot)
+  if (-not (Test-Path -LiteralPath $VendorRoot -PathType Container)) {
+    return $null
+  }
+  # Look for *.cp3XX-win_amd64.pyd files (numpy, etc.) to detect the ABI
+  # that the vendor was built against.
+  $abis = @()
+  $pydFiles = Get-ChildItem -LiteralPath $VendorRoot -Recurse -Filter "*.cp3*-win_amd64.pyd" -ErrorAction SilentlyContinue
+  if ($pydFiles) {
+    $abis = $pydFiles | ForEach-Object {
+      if ($_.Name -match '\.cp(\d{3,})-win_amd64\.pyd$') {
+        "cp$($matches[1])"
+      }
+    } | Where-Object { $_ } | Sort-Object -Unique
+  }
+  if (-not $abis) {
+    return $null
+  }
+  $abiArray = @($abis)
+  if ($abiArray.Count -gt 1) {
+    throw "vendor/ contains mixed Python ABIs: $($abiArray -join ', '). Clean vendor/ and rebuild against a single Python version."
+  }
+  return $abiArray[0]
+}
+
+function Resolve-ReviewPython {
+  param([string]$TargetMinor)
+
+  # 1. Explicit override via env variable.
+  $override = $env:AUTO_MOSAIC_REVIEW_PYTHON
+  if ($override) {
+    if (-not (Test-PythonExe -Path $override)) {
+      throw "AUTO_MOSAIC_REVIEW_PYTHON points to a missing file: $override"
+    }
+    Write-Host "  Using AUTO_MOSAIC_REVIEW_PYTHON override: $override"
+    return $override
+  }
+
+  # 2. py launcher with target minor.
+  $pyCmd = Get-Command py.exe -ErrorAction SilentlyContinue
+  if ($pyCmd) {
+    $argList = @("-$TargetMinor", "-c", "import sys; print(sys.executable)")
+    $launched = & py.exe @argList 2>$null
+    if ($LASTEXITCODE -eq 0 -and $launched) {
+      $candidate = $launched.Trim()
+      if (Test-PythonExe -Path $candidate) {
+        Write-Host "  Found Python $TargetMinor via py launcher: $candidate"
+        return $candidate
+      }
+    }
+  }
+
+  # 3. Common install locations for the target minor version.
+  $minorNoDot = $TargetMinor.Replace(".", "")
+  $candidates = @(
+    (Join-Path $env:LOCALAPPDATA "Programs\Python\Python$minorNoDot\python.exe"),
+    (Join-Path $env:ProgramFiles "Python$minorNoDot\python.exe"),
+    "C:\Python$minorNoDot\python.exe"
+  )
+  foreach ($candidate in $candidates) {
+    if (Test-PythonExe -Path $candidate) {
+      Write-Host "  Found Python $TargetMinor at standard location: $candidate"
+      return $candidate
+    }
+  }
+
+  # 4. Fallback: current `python` on PATH (warns if minor doesn't match).
+  $fallback = & python -c "import sys; print(sys.executable)" 2>$null
+  if ($LASTEXITCODE -eq 0 -and $fallback) {
+    $fallbackExe = $fallback.Trim()
+    if (Test-PythonExe -Path $fallbackExe) {
+      Write-Host "  Falling back to 'python' on PATH: $fallbackExe"
+      return $fallbackExe
+    }
+  }
+
+  throw @"
+Could not find a Python $TargetMinor interpreter.
+Resolution attempted (in order):
+  1. $($env:AUTO_MOSAIC_REVIEW_PYTHON) (AUTO_MOSAIC_REVIEW_PYTHON env)
+  2. py.exe -$TargetMinor
+  3. $($candidates -join ', ')
+  4. python on PATH
+
+Install Python $TargetMinor, or set AUTO_MOSAIC_REVIEW_PYTHON to point at a compatible interpreter.
+"@
+}
+
+# ---------------------------------------------------------------------------
+# Detect the ABI the vendor was built against, then select a matching Python.
+# ---------------------------------------------------------------------------
+
+$vendorRoot = Join-Path $backendRoot "vendor"
+$vendorAbi = Get-VendorAbi -VendorRoot $vendorRoot
+if (-not $vendorAbi) {
+  throw "Could not detect the ABI of apps/backend/vendor/ — no cp3XX-win_amd64.pyd files found. vendor/ may be missing or incomplete."
+}
+Write-Host "Detected vendor ABI: $vendorAbi"
+
+# Derive the expected Python minor version from the ABI ("cp312" -> "3.12").
+if ($vendorAbi -notmatch '^cp(\d)(\d+)$') {
+  throw "Unexpected vendor ABI format: $vendorAbi"
+}
+$targetMinor = "$($matches[1]).$($matches[2])"
+Write-Host "Target Python minor version: $targetMinor"
+
+$pythonExe = Resolve-ReviewPython -TargetMinor $targetMinor
+if (-not (Test-PythonExe -Path $pythonExe)) {
   throw "Could not resolve python.exe from the current environment."
 }
+
+# Validate that the selected Python matches the vendor ABI.
+$selectedMinor = Get-PythonMinor -PythonExe $pythonExe
+$expectedMinor = $targetMinor
+if ($selectedMinor -ne $expectedMinor) {
+  throw @"
+Python ABI mismatch.
+Selected Python : $pythonExe (Python $selectedMinor)
+Vendor ABI       : $vendorAbi (requires Python $expectedMinor)
+
+Either:
+  - Install Python $expectedMinor and set AUTO_MOSAIC_REVIEW_PYTHON, or
+  - Rebuild apps/backend/vendor/ against Python $selectedMinor.
+
+Silent ABI mismatches caused review-runtime workers to die at import time
+(observed 2026-04-09). This preparation step aborts rather than ship a
+broken runtime.
+"@
+}
+Write-Host "Python ABI check passed: selected Python $selectedMinor matches vendor $vendorAbi"
 
 $pythonRoot = Split-Path -Parent $pythonExe
 $pythonTarget = Join-Path $resourceRoot "python"
@@ -46,7 +204,7 @@ foreach ($name in $pythonFiles) {
 }
 
 # バージョン付き DLL (python3XX.dll) を動的に検出してコピー
-# python3.dll はスタブであり python3XX.dll (例: python314.dll) が python.exe の実体 DLL
+# python3.dll はスタブであり python3XX.dll (例: python312.dll) が python.exe の実体 DLL
 # 旧コードは python312.dll をハードコードしており、3.12 以外の環境で DLL が欠落していた
 Get-ChildItem -LiteralPath $pythonRoot -Filter "python3??.dll" | ForEach-Object {
   if ($_.Name -ne "python3.dll") {
@@ -94,8 +252,12 @@ Get-ChildItem -LiteralPath $ffmpegRoot -File | Where-Object {
 
 $pythonVersion = (& $pythonExe -c "import sys; print(sys.version.split()[0])" 2>$null)
 $manifest = @{
-  prepared_at    = (Get-Date).ToString("s")
-  python_version = $pythonVersion
+  prepared_at          = (Get-Date).ToString("s")
+  python_version       = $pythonVersion
+  python_minor         = $selectedMinor
+  python_source        = $pythonExe
+  vendor_abi           = $vendorAbi
+  abi_check_passed     = $true
 }
 
 $manifest | ConvertTo-Json -Depth 4 | Set-Content -Path (Join-Path $resourceRoot "manifest.json") -Encoding UTF8
@@ -106,3 +268,4 @@ $manifest | ConvertTo-Json -Depth 4 | Set-Content -Path (Join-Path $resourceRoot
 "@ | Set-Content -Path (Join-Path $resourceRoot ".gitignore") -Encoding UTF8
 "Review runtime staging output. Run review:runtime to repopulate this directory." | Set-Content -Path (Join-Path $resourceRoot "README.txt") -Encoding UTF8
 Write-Host "Prepared review runtime at $resourceRoot"
+Write-Host "  Python: $pythonExe ($pythonVersion, $vendorAbi)"
