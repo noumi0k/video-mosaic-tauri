@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import os
 import subprocess
 import sys
@@ -14,6 +15,50 @@ from auto_mosaic.infra.ai.detect_jobs import (
     stderr_log_path,
     write_status,
 )
+from auto_mosaic.infra.ai.model_catalog import ONNX_MAGIC_BYTES, get_model_spec_map
+from auto_mosaic.runtime.paths import ensure_runtime_dirs
+
+
+_HTML_SIGS = (b"<!DOCTYPE", b"<html", b"<!doctype")
+
+
+def _model_name_for_detect_payload(payload: dict) -> str:
+    """Mirror the backend-key → filename mapping used in detect_video.py."""
+    backend = str(payload.get("backend") or "nudenet_320n")
+    if backend == "nudenet_640m":
+        return "640m.onnx"
+    if backend == "erax_v1_1":
+        return "erax_nsfw_yolo11s.onnx"
+    return "320n.onnx"
+
+
+def _model_integrity_status(path: Path, spec) -> str:
+    """Quick pre-flight check: returns 'missing' | 'broken' | 'installed'.
+
+    Intentionally avoids importing doctor.py to keep this module free of
+    the heavier onnxruntime / gpu_diagnostics imports that doctor brings in.
+    SHA-256 is skipped here (already verified at download time).
+    """
+    if not path.exists():
+        return "missing"
+    try:
+        size = path.stat().st_size
+        if size < 1024:
+            return "broken"
+        if spec is not None and spec.expected_size is not None and size != spec.expected_size:
+            return "broken"
+        header = path.read_bytes()[:16]
+        if any(header.startswith(s) or header.lstrip().startswith(s) for s in _HTML_SIGS):
+            return "broken"
+        if spec is not None:
+            magic = spec.valid_magic_bytes
+        else:
+            magic = ONNX_MAGIC_BYTES if path.suffix.lower() == ".onnx" else None
+        if magic is not None and header[0] not in magic:
+            return "broken"
+    except OSError:
+        return "broken"
+    return "installed"
 
 
 def _backend_root() -> Path:
@@ -61,6 +106,26 @@ def _spawn_detect_worker(job_id: str, payload: dict) -> int:
 
 
 def run(payload: dict) -> dict:
+    # --- Pre-flight: verify required model integrity before spawning worker ---
+    model_name = _model_name_for_detect_payload(payload)
+    runtime_dirs = ensure_runtime_dirs(payload.get("paths"))
+    model_path = Path(runtime_dirs.model_dir) / model_name
+    spec = get_model_spec_map().get(model_name)
+    model_status = _model_integrity_status(model_path, spec)
+    if model_status != "installed":
+        code = "MODEL_MISSING" if model_status == "missing" else "MODEL_BROKEN"
+        msg = (
+            f"Detector model is not available: {model_name}"
+            if model_status == "missing"
+            else f"Detector model failed integrity check: {model_name}"
+            f" — run doctor to diagnose, or re-download the model."
+        )
+        return failure("start-detect-job", code, msg, {
+            "model_name": model_name,
+            "model_path": str(model_path),
+            "model_status": model_status,
+        })
+
     job_id = generate_job_id()
     queued_status = build_status(
         job_id=job_id,

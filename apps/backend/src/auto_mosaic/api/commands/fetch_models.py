@@ -1,17 +1,82 @@
 from __future__ import annotations
 
+import hashlib
 import os
 import tempfile
 import urllib.request
 from pathlib import Path
 
 from auto_mosaic.application.responses import failure, success
-from auto_mosaic.infra.ai.model_catalog import get_model_spec_map
+from auto_mosaic.infra.ai.model_catalog import ONNX_MAGIC_BYTES, ModelSpec, get_model_spec_map
 from auto_mosaic.runtime.paths import ensure_runtime_dirs
+
+
+_HTML_SIGNATURES = (b"<!DOCTYPE", b"<html", b"<!doctype")
+_MIN_MODEL_BYTES = 1024
 
 
 class ModelFetchCancelled(Exception):
     pass
+
+
+def _verify_downloaded_file(path: Path, spec: ModelSpec | None = None) -> None:
+    """Verify a downloaded file before it is promoted to its final path.
+
+    Raises ValueError with a descriptive message if any check fails.
+    Checks are applied cheapest-first:
+    1. File exists and is at least _MIN_MODEL_BYTES.
+    2. First bytes are not HTML markup (auth-redirect / error page).
+    3. Magic bytes match spec.valid_magic_bytes (or ONNX_MAGIC_BYTES for
+       .onnx files when spec is absent); skipped when spec.valid_magic_bytes
+       is explicitly None (e.g. PyTorch .pt files).
+    4. File size matches spec.expected_size when known.
+    5. SHA-256 matches spec.expected_sha256 when known.
+    """
+    if not path.exists():
+        raise ValueError(f"File does not exist: {path}")
+
+    size = path.stat().st_size
+    if size < _MIN_MODEL_BYTES:
+        raise ValueError(
+            f"File is too small ({size} bytes); minimum {_MIN_MODEL_BYTES} bytes expected."
+            " Likely a partial download or an error-page response."
+        )
+
+    header = path.read_bytes()[:16]
+
+    if any(header.startswith(sig) or header.lstrip().startswith(sig) for sig in _HTML_SIGNATURES):
+        raise ValueError(
+            "Downloaded file is an HTML page, not a model file."
+            " The server returned an authentication error or redirect."
+            " Check the download URL and required request headers."
+        )
+
+    if spec is not None:
+        magic = spec.valid_magic_bytes          # None means skip the check
+    else:
+        magic = ONNX_MAGIC_BYTES if path.suffix.lower() == ".onnx" else None
+
+    if magic is not None and header[0] not in magic:
+        raise ValueError(
+            f"File header byte 0x{header[0]:02x} is not a recognised magic byte"
+            f" for this model type."
+            " The file may be corrupt or in an unexpected format."
+        )
+
+    if spec is not None and spec.expected_size is not None and size != spec.expected_size:
+        raise ValueError(
+            f"File size {size} bytes does not match expected {spec.expected_size} bytes."
+            " The download may be incomplete or the upstream asset was updated."
+        )
+
+    if spec is not None and spec.expected_sha256:
+        digest = hashlib.sha256(path.read_bytes()).hexdigest()
+        if digest != spec.expected_sha256:
+            raise ValueError(
+                f"SHA-256 checksum mismatch."
+                f" Expected {spec.expected_sha256},"
+                f" got {digest}."
+            )
 
 
 def _download_to_path(
@@ -24,6 +89,7 @@ def _download_to_path(
     model_name: str | None = None,
     model_index: int | None = None,
     model_total: int | None = None,
+    spec: ModelSpec | None = None,
 ) -> int:
     target_path.parent.mkdir(parents=True, exist_ok=True)
     temp_path: Path | None = None
@@ -93,6 +159,10 @@ def _download_to_path(
             handle.flush()
             os.fsync(handle.fileno())
 
+        # Verify integrity of the temp file BEFORE promoting it to the
+        # final path.  If verification fails, the temp file is deleted and
+        # the target is never touched.
+        _verify_downloaded_file(temp_path, spec)
         temp_path.replace(target_path)
         return total_bytes
     except Exception:
@@ -168,16 +238,22 @@ def run(payload: dict) -> dict:
             continue
 
         if target_path.exists():
-            results.append(
-                {
-                    "name": name,
-                    "status": "skipped",
-                    "message": "Already available.",
-                    "path": str(target_path),
-                    "source": spec.source_label,
-                }
-            )
-            continue
+            try:
+                _verify_downloaded_file(target_path, spec)
+                # Integrity check passed — the installed file is good.
+                results.append(
+                    {
+                        "name": name,
+                        "status": "skipped",
+                        "message": "Already available.",
+                        "path": str(target_path),
+                        "source": spec.source_label,
+                    }
+                )
+                continue
+            except ValueError:
+                # File is present but broken — fall through to re-download.
+                pass
 
         if not spec.url:
             note = spec.note or "This model is not directly downloadable in the review build."
@@ -203,7 +279,11 @@ def run(payload: dict) -> dict:
                 model_name=name,
                 model_index=index,
                 model_total=total_models,
+                spec=spec,
             )
+            # Verification was already performed inside _download_to_path
+            # before the temp file was promoted.  This progress event is kept
+            # for UI parity; no additional verification step is needed here.
             report(
                 stage="verifying",
                 message=f"{name} を検証中",
@@ -217,7 +297,7 @@ def run(payload: dict) -> dict:
                 {
                     "name": name,
                     "status": "downloaded",
-                    "message": "Downloaded successfully.",
+                    "message": "Downloaded and verified successfully.",
                     "path": str(target_path),
                     "bytes": downloaded_bytes,
                     "source": spec.source_label,

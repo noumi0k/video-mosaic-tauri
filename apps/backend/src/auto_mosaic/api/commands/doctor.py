@@ -7,7 +7,7 @@ from pathlib import Path
 
 from auto_mosaic.application.responses import success
 from auto_mosaic.infra.ai.gpu_diagnostics import _minimal_onnx_gpu_test, get_onnxruntime_summary
-from auto_mosaic.infra.ai.model_catalog import ModelSpec, get_optional_model_names, get_required_model_names, get_model_spec_map
+from auto_mosaic.infra.ai.model_catalog import ONNX_MAGIC_BYTES, ModelSpec, get_model_spec_map, get_optional_model_names, get_required_model_names
 from auto_mosaic.infra.ai.model_converter import ultralytics_available
 from auto_mosaic.runtime.bootstrap import bootstrap_backend_environment
 from auto_mosaic.runtime.external_tools import resolve_external_tool
@@ -17,55 +17,45 @@ from auto_mosaic.runtime.paths import build_path_summary, ensure_runtime_dirs
 _HTML_SIGNATURES = (b"<!DOCTYPE", b"<html", b"<!doctype")
 _MIN_MODEL_BYTES = 1024  # any real model file is at least 1 KB
 
-# Valid first bytes for an ONNX ModelProto (protobuf field tags for each known field).
-# Each tag encodes (field_number << 3) | wire_type.
-# HTML pages start with 0x3c ('<') which is excluded by the HTML guard above, but
-# a raw protobuf field tag of 0x3c (field 7, wire 4 = end-group, invalid) would also
-# be rejected here.
-_ONNX_PROTO_FIRST_BYTES = frozenset({
-    0x08,  # field 1 ir_version      (varint)
-    0x12,  # field 2 producer_name   (len)
-    0x1a,  # field 3 producer_version(len)
-    0x22,  # field 4 domain          (len)
-    0x28,  # field 5 model_version   (varint)
-    0x32,  # field 6 doc_string      (len)
-    0x3a,  # field 7 graph           (len)
-    0x42,  # field 8 opset_import    (len)
-    0x4a,  # field 9 metadata_props  (len)
-    0x72,  # field 14 ir_version_prerelease (len)
-})
 
+def _check_model_file(path: Path, spec: ModelSpec | None = None) -> str:
+    """Return integrity status: "missing" | "broken" | "installed".
 
-def _check_model_file(path: Path, spec: ModelSpec | None = None) -> tuple[bool, bool]:
-    """Return (exists, valid).
-
-    Validity checks (applied in order, cheapest first):
+    Checks (cheapest first):
     1. File must exist and be at least _MIN_MODEL_BYTES.
     2. If spec.expected_size is known, file size must match exactly.
     3. First bytes must not be HTML markup (catches auth-redirect saves).
-    4. For .onnx files, first byte must be a valid protobuf field tag.
+    4. Magic bytes: use spec.valid_magic_bytes when set; fall back to
+       ONNX_MAGIC_BYTES for .onnx files; skip when spec.valid_magic_bytes is
+       explicitly None (e.g. PyTorch .pt files).
     5. If spec.expected_sha256 is known, SHA-256 must match.
     """
     if not path.exists():
-        return False, False
+        return "missing"
     try:
         size = path.stat().st_size
         if size < _MIN_MODEL_BYTES:
-            return True, False
+            return "broken"
         if spec is not None and spec.expected_size is not None and size != spec.expected_size:
-            return True, False
+            return "broken"
         header = path.read_bytes()[:16]
         if any(header.startswith(sig) or header.lstrip().startswith(sig) for sig in _HTML_SIGNATURES):
-            return True, False
-        if path.suffix.lower() == ".onnx" and header[0] not in _ONNX_PROTO_FIRST_BYTES:
-            return True, False
+            return "broken"
+        # Determine which magic byte set to use for this file.
+        if spec is not None:
+            magic = spec.valid_magic_bytes  # None means "skip check"
+        else:
+            # No spec available: apply ONNX magic check for .onnx by default.
+            magic = ONNX_MAGIC_BYTES if path.suffix.lower() == ".onnx" else None
+        if magic is not None and header[0] not in magic:
+            return "broken"
         if spec is not None and spec.expected_sha256:
             digest = hashlib.sha256(path.read_bytes()).hexdigest()
             if digest != spec.expected_sha256:
-                return True, False
+                return "broken"
     except OSError:
-        return True, False
-    return True, True
+        return "broken"
+    return "installed"
 
 
 def run(payload: dict) -> dict:
@@ -82,16 +72,17 @@ def run(payload: dict) -> dict:
     for name in get_required_model_names():
         path = model_dir / name
         spec = spec_map[name]
-        exists, valid = _check_model_file(path, spec)
+        status = _check_model_file(path, spec)
         required_models.append(
             {
                 "name": name,
-                "exists": exists and valid,
+                "status": status,                  # "missing" | "broken" | "installed"
+                "exists": status != "missing",     # backward-compat: file is present on disk
+                "valid": status == "installed",    # backward-compat: file passed all checks
                 "path": str(path),
                 "downloadable": bool(spec.url),
                 "source": spec.source_label,
                 "note": spec.note,
-                "valid": valid,
                 "auto_fetch": spec.auto_fetch,
             }
         )
@@ -100,16 +91,17 @@ def run(payload: dict) -> dict:
     for name in get_optional_model_names():
         path = model_dir / name
         spec = spec_map[name]
-        exists, valid = _check_model_file(path, spec)
+        status = _check_model_file(path, spec)
         optional_models.append(
             {
                 "name": name,
-                "exists": exists and valid,
+                "status": status,
+                "exists": status != "missing",
+                "valid": status == "installed",
                 "path": str(path),
                 "downloadable": bool(spec.url),
                 "source": spec.source_label,
                 "note": spec.note,
-                "valid": valid,
                 "auto_fetch": spec.auto_fetch,
             }
         )
@@ -121,10 +113,10 @@ def run(payload: dict) -> dict:
     _erax_pt_path = model_dir / _erax_pt_name
     _erax_onnx_path = model_dir / _erax_onnx_name
     _erax_pt_ok = bool(
-        next((m for m in optional_models if m["name"] == _erax_pt_name and m["exists"]), None)
+        next((m for m in optional_models if m["name"] == _erax_pt_name and m["status"] == "installed"), None)
     )
     _erax_onnx_ok = bool(
-        next((m for m in optional_models if m["name"] == _erax_onnx_name and m["exists"]), None)
+        next((m for m in optional_models if m["name"] == _erax_onnx_name and m["status"] == "installed"), None)
     )
     if _erax_onnx_ok:
         _erax_state = "ready"
@@ -166,8 +158,8 @@ def run(payload: dict) -> dict:
         warnings.append("ffmpeg was not found in configured locations or PATH.")
     if not ffprobe["found"]:
         warnings.append("ffprobe was not found in configured locations or PATH.")
-    if not all(item["exists"] for item in required_models):
-        warnings.append("One or more required models are missing.")
+    if not all(item["status"] == "installed" for item in required_models):
+        warnings.append("One or more required models are missing or broken.")
     if unwritable_runtime_paths:
         warnings.append(
             "One or more runtime folders are not writable: " + ", ".join(unwritable_runtime_paths) + "."
@@ -176,7 +168,7 @@ def run(payload: dict) -> dict:
     ready = (
         ffmpeg["found"]
         and ffprobe["found"]
-        and all(item["exists"] for item in required_models)
+        and all(item["status"] == "installed" for item in required_models)
         and not unwritable_runtime_paths
     )
 

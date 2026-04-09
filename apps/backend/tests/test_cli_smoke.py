@@ -211,10 +211,12 @@ def test_fetch_models_downloads_missing_file(monkeypatch):
     model_root = TEST_ROOT / "fetched-models"
     payload_paths = {"model_dir": str(model_root)}
 
-    def fake_download(url: str, target_path: Path) -> int:
+    def fake_download(url: str, target_path: Path, **_kwargs) -> int:
         target_path.parent.mkdir(parents=True, exist_ok=True)
-        target_path.write_bytes(b"fake-model")
-        return len(b"fake-model")
+        # Write a minimal valid-looking ONNX file (starts with 0x08, size >= 1024).
+        data = bytes([0x08]) + b"\x00" * 2047
+        target_path.write_bytes(data)
+        return len(data)
 
     monkeypatch.setattr("auto_mosaic.api.commands.fetch_models._download_to_path", fake_download)
 
@@ -228,10 +230,12 @@ def test_fetch_models_downloads_missing_file(monkeypatch):
 def test_fetch_models_skips_existing_file():
     model_root = TEST_ROOT / "existing-models"
     model_root.mkdir(parents=True, exist_ok=True)
-    existing = model_root / "320n.onnx"
-    existing.write_bytes(b"existing")
+    # Use 640m.onnx which has no expected_size / expected_sha256 in its spec,
+    # so a valid-magic 2 KB file passes the integrity check.
+    existing = model_root / "640m.onnx"
+    existing.write_bytes(bytes([0x08]) + b"\x00" * 2047)
 
-    response = fetch_models.run({"model_names": ["320n.onnx"], "paths": {"model_dir": str(model_root)}})
+    response = fetch_models.run({"model_names": ["640m.onnx"], "paths": {"model_dir": str(model_root)}})
     assert response["ok"] is True
     assert response["data"]["downloaded"] == 0
     assert response["data"]["skipped"] == 1

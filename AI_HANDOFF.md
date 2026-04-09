@@ -4,10 +4,72 @@
 - Frontend recovered shell is now back to a usable editor shape.
 - `App.tsx` is a clean UTF-8 shell again and no longer carries the old mojibake damage.
 - The shared Job Panel remains the common progress surface for runtime jobs, detect jobs, and export.
+- Model download is now integrity-based: verify-before-promote, missing/broken/installed status, detect preflight guard.
 - Current desktop build status on April 8, 2026: `npm.cmd run build` in `apps/desktop` passed.
 - Current desktop mojibake check status on April 8, 2026: `npm.cmd run check:mojibake` in `apps/desktop` passed.
 - Current desktop test status on April 8, 2026: `npm.cmd test` in `apps/desktop` passed with `21/21`.
 - Current backend smoke status on April 8, 2026: `python -m pytest tests\\test_cli_smoke.py` in `apps/backend` passed with `62 passed`.
+- Current backend integrity test status on April 9, 2026: `python -m pytest tests/test_model_integrity.py` passed with `25/25`.
+
+## What Was Fixed In This Pass (April 9, 2026 — model integrity spec fixed)
+
+### 結論
+detect failure の直接原因は UI や Phase 4 continuity 実装ではなく、
+**破損した `320n.onnx` による detect worker の native crash** だった。
+
+### 発生メカニズム
+1. GitHub Release の取得で `browser_download_url` 側を使った結果、HTML リダイレクト内容が返るケースがあった
+2. ダウンロード処理に Content-Type / header / hash 検証がなく、HTML が `.onnx` として保存された
+3. doctor はファイル存在のみで取得済み扱いしていた
+4. detect worker が破損 ONNX を onnxruntime で開こうとして native crash
+5. worker は failed を書かずに死亡し、polling 側で `interrupted` として回収された
+
+### 恒久対策
+
+#### 1. catalog 正本化 (`model_catalog.py`)
+`ONNX_MAGIC_BYTES` を追加・公開。`ModelSpec` に以下フィールドを追加:
+- `model_id` — ファイル名と無関係な安定識別子
+- `source_type` — `"github_release_asset"` / `"huggingface"` / `"derived"` / `"none"`
+- `valid_magic_bytes` — `ONNX_MAGIC_BYTES` を設定（`.pt` など形式不定のモデルは `None` でスキップ）
+- `browser_download_url` の生文字列は正本にしない。常に `api.github.com/repos/…/assets/<ID>` を使う。
+
+#### 2. 2-stage download (`fetch_models.py`)
+モデル取得は必ず以下で行う:
+- `.download` 一時ファイルへ保存
+- `_verify_downloaded_file()` で全チェック（サイズ → HTML → magic bytes → expected_size → sha256）
+- 通過時のみ `rename()` で正式配置（失敗時は一時ファイルを削除、ターゲット未更新）
+- skip-if-exists は `_verify_downloaded_file` 通過時のみ適用。失敗時は再ダウンロード。
+
+#### 3. integrity-based doctor (`doctor.py`)
+モデル判定は existence base ではなく integrity base に変更:
+- `"missing"` — ファイルなし
+- `"broken"` — ファイルあり、整合性チェック失敗
+- `"installed"` — ファイルあり、全チェック通過
+
+`exists=true` でも整合性が崩れていれば `broken` 扱い。レスポンスに `"status"` フィールドを追加（`"exists"` / `"valid"` は後方互換で保持）。
+
+#### 4. detect preflight guard (`start_detect_job.py`)
+detect 実行前に required model の整合性を確認:
+- `broken` → `MODEL_BROKEN` で即 failure、worker 未起動
+- `missing` → `MODEL_MISSING` で即 failure、worker 未起動
+
+### Files changed
+- `apps/backend/src/auto_mosaic/infra/ai/model_catalog.py`
+- `apps/backend/src/auto_mosaic/api/commands/doctor.py`
+- `apps/backend/src/auto_mosaic/api/commands/fetch_models.py`
+- `apps/backend/src/auto_mosaic/api/commands/start_detect_job.py`
+- `apps/backend/tests/test_model_integrity.py` (新規、25テスト)
+- `apps/backend/tests/test_cli_smoke.py` (既存テスト2件を valid ONNX バイトに更新)
+
+### 残課題
+- `apps/desktop/src-tauri/resources/review-runtime/` が未同期（`npm.cmd run review:runtime` 要実行）
+- 以下のモデルは `expected_size` / `expected_sha256` 固定が未完:
+  - `640m.onnx`
+  - `erax_nsfw_yolo11s.pt`
+  - `erax_nsfw_yolo11s.onnx`（変換生成物のため固定不可）
+  - `sam2_tiny_encoder.onnx` / `sam2_tiny_decoder.onnx`
+
+---
 
 ## What Was Fixed In This Pass (April 8, 2026 — ONNX validity + size/hash check)
 
@@ -151,9 +213,13 @@ destination was silently corrupted:
 - Do not bypass the shared job helpers for new long-running work.
 - Do not regress runtime-job cancel back into a state where terminal jobs can be overwritten to `cancelling`.
 - Do not ship a review build without re-running `npm.cmd run review:runtime` after any backend Python change.
+- Do not judge a model as installed by file existence alone — always use `_check_model_file` (integrity-based).
+- Do not promote a temp download file to its final name before `_verify_downloaded_file` passes.
+- Do not use `browser_download_url` as the download URL — always use `api.github.com/repos/…/assets/<ID>`.
 
 ## Next Logical Step
-1. Drive the full interactive UI flow in the Tauri window (open video → detect → edit on canvas → save/load → export) to confirm the wiring end-to-end.
-2. Implement Persistent Mask Track (P0): extend track lifetime beyond detection span, allow editing outside detection frames, add hold/predict/interpolate shape resolution.
-3. Continue moving editor-specific orchestration out of `App.tsx` into small hooks or controller modules before adding more editing features.
-4. (Backlog) Add expected_size + expected_sha256 for 640m.onnx, SAM2, erax once those files are available to hash locally.
+1. **Run `npm.cmd run review:runtime`** to sync the April 9 backend changes to `review-runtime`.
+2. Drive the full interactive UI flow in the Tauri window (open video → detect → edit on canvas → save/load → export) to confirm the wiring end-to-end.
+3. Implement Persistent Mask Track (P0): extend track lifetime beyond detection span, allow editing outside detection frames, add hold/predict/interpolate shape resolution.
+4. Continue moving editor-specific orchestration out of `App.tsx` into small hooks or controller modules before adding more editing features.
+5. (Backlog) Add `expected_size` + `expected_sha256` for `640m.onnx`, SAM2, erax once those files are available to hash locally.
