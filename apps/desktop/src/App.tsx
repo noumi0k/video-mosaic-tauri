@@ -640,19 +640,49 @@ export function App() {
     const timer = window.setInterval(() => {
       void Promise.all(
         activeJobIds.map(async (jobId) => {
-          const status = await pollDetectJobStatus(backend, jobId);
-          if (!status) return;
-          setDetectJobs((current) => ({ ...current, [jobId]: status }));
-          if (!isTerminalDetectState(status.state) || processedDetectJobsRef.current.has(jobId)) return;
-          processedDetectJobsRef.current.add(jobId);
-          if (status.state !== "succeeded") return;
-          const result = await collectDetectJobResult(backend, jobId);
-          if (!result?.ok) {
-            setErrorMessage(prettyError(result?.error));
-            return;
+          try {
+            const status = await pollDetectJobStatus(backend, jobId);
+            if (!status) return;
+            setDetectJobs((current) => ({ ...current, [jobId]: status }));
+            if (!isTerminalDetectState(status.state) || processedDetectJobsRef.current.has(jobId)) return;
+            processedDetectJobsRef.current.add(jobId);
+            if (status.state !== "succeeded") return;
+            // Fetch + apply result.  Any error here must surface — it must
+            // not be silently swallowed by `void Promise.all`, or the UI
+            // will continue to show the pre-detect state even though
+            // result.json has been written on disk.
+            const result = await collectDetectJobResult(backend, jobId);
+            if (!result?.ok) {
+              console.error("[detect] collectDetectJobResult failed", { jobId, error: result?.error });
+              setErrorMessage(prettyError(result?.error) || "detect result fetch failed");
+              return;
+            }
+            const data = result.data as MutationResult & {
+              selection?: { track_id: string | null; frame_index: number | null };
+            };
+            if (!data?.project || !data?.read_model) {
+              console.error("[detect] malformed result.data — missing project/read_model", { jobId, data });
+              setErrorMessage("Detection returned an unexpected payload.");
+              return;
+            }
+            syncProjectState(data, { dirty: true });
+            // Apply selection from the detect result so the first detected
+            // track is focused and the timeline/canvas reveal the new
+            // tracks immediately.
+            if (data.selection) {
+              setSelectedTrackId(data.selection.track_id);
+              setSelectedKeyframeFrame(data.selection.frame_index);
+              if (data.selection.frame_index !== null) {
+                setCurrentFrame(data.selection.frame_index);
+              }
+            }
+            setActivity(uiText.activity.detectCompleted);
+          } catch (error) {
+            // Silent failures here are what caused UI-vs-backend divergence
+            // (backend result.json is good but UI keeps the old stale state).
+            console.error("[detect] poll/apply threw", { jobId, error });
+            setErrorMessage(prettyError(error) || "Unexpected detect polling error");
           }
-          syncProjectState(result.data as MutationResult, { dirty: true });
-          setActivity(uiText.activity.detectCompleted);
         }),
       );
     }, 500);
@@ -787,6 +817,17 @@ export function App() {
         const timer = window.setTimeout(() => {
           dismissTimersRef.current.delete(item.job_id);
           setDismissedJobIds((prev) => new Set([...prev, item.job_id]));
+          // Also drop the job from detectJobs so the polling effect and
+          // the jobPanelItems memo don't keep the stale terminal state
+          // around.  Without this, a session that accumulates several
+          // runs ends up with multiple ghost cards that reappear after
+          // any unrelated re-render.
+          setDetectJobs((current) => {
+            if (!(item.job_id in current)) return current;
+            const next = { ...current };
+            delete next[item.job_id];
+            return next;
+          });
         }, delay);
         dismissTimersRef.current.set(item.job_id, timer);
       }
@@ -801,6 +842,13 @@ export function App() {
     }
     scheduledDismissRef.current.add(jobId);
     setDismissedJobIds((prev) => new Set([...prev, jobId]));
+    // Also drop from detectJobs — see auto-dismiss effect above for why.
+    setDetectJobs((current) => {
+      if (!(jobId in current)) return current;
+      const next = { ...current };
+      delete next[jobId];
+      return next;
+    });
   }
 
   const visibleJobPanelItems = useMemo(
