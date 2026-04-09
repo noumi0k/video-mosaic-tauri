@@ -10,6 +10,15 @@ from typing import Any
 import cv2
 import numpy as np
 
+from auto_mosaic.domain.mask_continuity import (
+    CandidateBBox,
+    WriteAction,
+    WriteDecision,
+    apply_write_action,
+    decide_write,
+    evaluate_continuity,
+    merge_held_segments,
+)
 from auto_mosaic.domain.project import Keyframe, MaskTrack, ProjectDocument
 from auto_mosaic.runtime.paths import ensure_runtime_dirs
 
@@ -1130,18 +1139,46 @@ def _apply_frame_detections(
             )
             track_cursors.append(matched_cursor)
 
-        matched_cursor.track.keyframes.append(
-            Keyframe(
+        # W1-W4: evaluate continuity against the prior keyframe and apply the
+        # write decision.  The first detection on a fresh track bypasses
+        # continuity (no history) and is always written.
+        candidate = CandidateBBox(
+            bbox=(bbox[0], bbox[1], bbox[2], bbox[3]),
+            confidence=float(detection["score"]),
+            shape_type=shape_type,
+        )
+        prior_kf = matched_cursor.track.keyframes[-1] if matched_cursor.track.keyframes else None
+        if prior_kf is None:
+            # Brand-new track: write the first keyframe unconditionally.
+            decision = WriteDecision(action=WriteAction.WRITE_DETECTED)
+        else:
+            frame_gap = frame_idx - prior_kf.frame_index
+            verdict = evaluate_continuity(prior_kf, candidate, frame_gap)
+            decision = decide_write(matched_cursor.track, frame_idx, candidate, verdict)
+
+        if decision.action == WriteAction.WRITE_DETECTED:
+            # Preserve contour-derived points (richer than W4's bbox-corner
+            # fallback).  All other decision paths use apply_write_action.
+            matched_cursor.track.keyframes.append(Keyframe(
                 frame_index=int(frame_idx),
                 shape_type=shape_type,
                 bbox=bbox,
                 points=points,
                 confidence=float(detection["score"]),
                 source="detector",
-            )
-        )
-        matched_cursor.last_frame_index = int(frame_idx)
-        matched_cursor.last_bbox = bbox
+                source_detail="detector_accepted",
+            ))
+        elif decision.action != WriteAction.SKIP:
+            apply_write_action(matched_cursor.track, frame_idx, candidate, decision)
+
+        # Advance cursor so future frames can match this track.
+        if decision.action in (WriteAction.WRITE_DETECTED, WriteAction.WRITE_ANCHORED):
+            matched_cursor.last_frame_index = int(frame_idx)
+            matched_cursor.last_bbox = bbox
+        elif decision.action in (WriteAction.EXTEND_HELD, WriteAction.EXTEND_UNCERTAIN):
+            # Keep last_bbox as the last known-good position for matching.
+            matched_cursor.last_frame_index = int(frame_idx)
+        # SKIP: leave cursor unchanged.
         used_track_ids.add(matched_cursor.track.track_id)
 
 
@@ -1359,6 +1396,7 @@ def _detect_composite_body(
     for ctx in contexts:
         for track in ctx.detector_tracks:
             track.keyframes.sort(key=lambda item: item.frame_index)
+            merge_held_segments(track)  # W5: normalise adjacent/overlapping same-state segments
             new_id = f"{ctx.backend_name}-{len(merged_tracks) + 1}"
             track.track_id = new_id
             track.label = f"{ctx.backend_name} {len(merged_tracks) + 1}"
@@ -1585,6 +1623,7 @@ def detect_project_video(project: ProjectDocument, payload: dict) -> DetectionSu
     report("building_tracks", 90.0, "Building detector tracks", current=len(detector_tracks), total=len(detector_tracks))
     for track in detector_tracks:
         track.keyframes.sort(key=lambda item: item.frame_index)
+        merge_held_segments(track)  # W5: normalise adjacent/overlapping same-state segments
 
     report("finalizing", 96.0, "Finalizing detection result", current=analyzed_frames, total=len(sampled_indexes))
 

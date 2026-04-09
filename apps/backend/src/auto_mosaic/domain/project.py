@@ -60,6 +60,7 @@ def _normalize_keyframe_payload(payload: dict[str, Any]) -> dict[str, Any]:
     if bbox is None:
         bbox = [0.0, 0.0, 0.1, 0.1]
 
+    _sd = payload.get("source_detail")
     return {
         "frame_index": int(payload["frame_index"]),
         "shape_type": str(payload.get("shape_type", "polygon")),
@@ -73,6 +74,8 @@ def _normalize_keyframe_payload(payload: dict[str, Any]) -> dict[str, Any]:
         "feather": payload.get("feather"),
         "is_locked": bool(payload.get("is_locked", False)),
         "contour_points": list(payload.get("contour_points") or []),
+        # source_detail is optional — absent in legacy projects normalizes to None.
+        "source_detail": str(_sd) if isinstance(_sd, str) and _sd else None,
     }
 
 
@@ -248,6 +251,7 @@ class Keyframe:
     feather: int | None = None
     is_locked: bool = False
     contour_points: list[list[float]] = field(default_factory=list)
+    source_detail: str | None = None
 
     @classmethod
     def from_payload(cls, payload: dict[str, Any]) -> "Keyframe":

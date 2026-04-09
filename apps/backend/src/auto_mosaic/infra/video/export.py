@@ -9,6 +9,7 @@ from pathlib import Path
 import cv2
 import numpy as np
 
+from auto_mosaic.domain.mask_continuity import resolve_for_render
 from auto_mosaic.domain.project import Keyframe, ProjectDocument
 from auto_mosaic.infra.video.export_jobs import clear_runtime_state, is_cancel_requested, write_status
 from auto_mosaic.runtime.external_tools import resolve_external_tool
@@ -326,9 +327,10 @@ def export_project_video(
                     for track in project.tracks:
                         if not track.visible:
                             continue
-                        active_keyframe = track.resolve_active_keyframe(frame_index)
-                        if active_keyframe is None:
+                        _resolved = resolve_for_render(track, frame_index)
+                        if _resolved is None:
                             continue
+                        active_keyframe = _resolved[0]
                         rendered = _apply_mosaic_mask(rendered, active_keyframe, mosaic_strength)
 
                     writer.write(rendered)
