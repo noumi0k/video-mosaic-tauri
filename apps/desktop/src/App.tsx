@@ -650,13 +650,12 @@ export function App() {
   }, [backend, runtimeJobs]);
 
   useEffect(() => {
+    // Collect jobs that still need attention: either actively running, or
+    // terminal but not yet processed (result not applied to UI state).
     const pendingJobIds = Object.values(detectJobs)
       .filter(
         (job) =>
           isActiveDetectState(job.state) ||
-          // Keep polling terminal jobs that haven't been collected yet.
-          // "interrupted" jobs may be reconciled to "succeeded" on the next poll
-          // when the backend discovers result.json after worker exit.
           (isTerminalDetectState(job.state) && !processedDetectJobsRef.current.has(job.job_id)),
       )
       .map((job) => job.job_id);
@@ -665,20 +664,28 @@ export function App() {
       void Promise.all(
         pendingJobIds.map(async (jobId) => {
           try {
-            const currentStatus = detectJobs[jobId];
-            const shouldPollStatus = !currentStatus || isActiveDetectState(currentStatus.state);
-            const status = shouldPollStatus ? await pollDetectJobStatus(backend, jobId) : currentStatus;
+            if (processedDetectJobsRef.current.has(jobId)) return;
+            // Always re-poll status for unprocessed jobs.  Backend
+            // reconcile_job_state may upgrade "interrupted" → "succeeded"
+            // when it discovers result.json after the worker exits.
+            const status = await pollDetectJobStatus(backend, jobId);
             if (!status) return;
-            if (shouldPollStatus) {
-              setDetectJobs((current) => ({ ...current, [jobId]: status }));
+            setDetectJobs((current) => ({ ...current, [jobId]: status }));
+
+            // Can we collect the result?
+            if (!isTerminalDetectState(status.state)) return;
+            // For non-succeeded terminal states without a result, show the
+            // error and stop.  "interrupted" with no result_available will be
+            // re-polled next interval (reconcile may fix it).
+            if (status.state !== "succeeded" && !status.result_available && !status.has_result) {
+              // Only surface the error once — skip if we already showed it.
+              if (status.error && !collectingDetectJobsRef.current.has(jobId)) {
+                setErrorMessage(prettyError(status.error) || `Detection ${status.state}`);
+              }
+              return;
             }
-            if (!hasCollectableDetectResult(status) || processedDetectJobsRef.current.has(jobId)) return;
             if (collectingDetectJobsRef.current.has(jobId)) return;
             collectingDetectJobsRef.current.add(jobId);
-            // Fetch + apply result.  Any error here must surface — it must
-            // not be silently swallowed by `void Promise.all`, or the UI
-            // will continue to show the pre-detect state even though
-            // result.json has been written on disk.
             try {
               const result = await collectDetectJobResult(backend, jobId);
               if (!result?.ok) {
@@ -696,9 +703,6 @@ export function App() {
                 return;
               }
               syncProjectState(data, { dirty: true });
-              // Apply selection from the detect result so the first detected
-              // track is focused and the timeline/canvas reveal the new
-              // tracks immediately.
               if (data.selection) {
                 setSelectedTrackId(data.selection.track_id);
                 setSelectedKeyframeFrame(data.selection.frame_index);
@@ -713,8 +717,6 @@ export function App() {
               collectingDetectJobsRef.current.delete(jobId);
             }
           } catch (error) {
-            // Silent failures here are what caused UI-vs-backend divergence
-            // (backend result.json is good but UI keeps the old stale state).
             console.error("[detect] poll/apply threw", { jobId, error });
             setErrorMessage(prettyError(error) || "Unexpected detect polling error");
           }
