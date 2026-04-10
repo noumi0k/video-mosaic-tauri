@@ -85,3 +85,27 @@ taurimozaic/
 3. [`docs/project/ai-handoff.md`](./docs/project/ai-handoff.md) — 直近の作業ログ
 4. [`CLAUDE.md`](./CLAUDE.md) — Claude 向け作業ルール
 5. [`AGENTS.md`](./AGENTS.md) — エージェント全般向けルール
+
+---
+
+## 変更履歴
+
+詳細な実装状況は [`docs/project/unimplemented-features.md`](./docs/project/unimplemented-features.md)、完成図は [`docs/architecture/要件定義書.md`](./docs/architecture/要件定義書.md) を参照してください。
+
+### 2026-04-11 — ドキュメント整理
+- 人間向けとエンジニア向けの入口を分離 (`docs/human/`, `docs/engineering/`)
+
+### 2026-04-10 — PySide6 機能パリティ達成
+- **マスク継続性**: polygon / ellipse interpolation、`expand_px` / feather 補間、track stitching (180 frame gap)、ephemeral track filter
+- **プロジェクト互換**: PySide6 v1 → Tauri schema v2 migration adapter (keyframe / track source、手動編集保護を含む)
+- **編集 UX**: Undo / Redo、track 作成 / 削除 / 分割 / 複製、keyframe 複製、F1 ヘルプ、edge ダブルクリックでの頂点追加
+- **書き出し**: FFmpeg h264 pipe export、解像度プリセット (source / 720p / 1080p / 4K)、自動 / 手動 bitrate、音声 mux、export 設定モーダル
+- **作業フロー**: 範囲検出 (I/O マーカー)、単一フレーム検出、IoU 範囲マージ、危険フレーム警告、60 秒自動保存、未保存ガード、キーボードショートカット、上書き確認
+- **検出安定化**: 検出 → UI 反映の race condition 修正、NudeNet v3.4 クラスインデックス修正、終端 job の再 polling、未処理ジョブの整理
+- **UI 仕上げ**: タイムラインマーカー、トランスポートバー、危険パネル、日本語 UI
+
+### 2026-04-09 — 基盤構築
+- マスク継続性エンジンと resolver 統合 (Phase 4-8: confirmed / held / predicted / interpolated / uncertain)
+- モデル integrity 検証 (HTML redirect / Git LFS pointer / SHA-256 / ONNX magic)、broken / missing モデルの検出ブロック
+- review-runtime の Python vendor ABI 一致検証
+- Auto Mosaic Tauri 版 初回 import (PySide6 版からの再構築)

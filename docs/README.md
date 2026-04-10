@@ -57,13 +57,14 @@ Auto Mosaic のドキュメント入口です。
 | [gpu-compatibility.md](./development/gpu-compatibility.md) | GPU の動作確認済みバージョン一覧 |
 | [gpu-diagnostics.md](./development/gpu-diagnostics.md) | GPU 診断コマンド |
 
-### [architecture/](./architecture/) — 設計履歴・参照資料
+### [architecture/](./architecture/) — 要件定義・設計履歴・参照資料
 
-ここは現在の作業正本ではなく、設計履歴と詳細参照資料です。
-現行実装の判断は [engineering/current-implementation.md](./engineering/current-implementation.md) を優先します。
+完成像としての要件定義と、設計履歴・詳細参照資料が混在します。
+現行実装の判断は [engineering/current-implementation.md](./engineering/current-implementation.md) を優先し、ここは「実現すべき完成図」と「過去の設計履歴」を確認するために使います。
 
 | ファイル | 内容 |
 |----------|------|
+| [要件定義書.md](./architecture/要件定義書.md) | **完成図としての要件定義 (target spec)。実装詳細は含まず、ユーザー価値・ドメイン不変条件・非機能要件を定義する** |
 | [requirements-spec-v2.1.md](./architecture/requirements-spec-v2.1.md) | 詳細要件仕様の履歴 |
 | [tauri-from-scratch-spec.md](./architecture/tauri-from-scratch-spec.md) | from-scratch 実装方針の履歴 |
 | [p4-retraining-requirements.md](./architecture/p4-retraining-requirements.md) | 教師データ保存・ローカル再学習の要件整理 |
