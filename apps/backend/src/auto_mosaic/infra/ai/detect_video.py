@@ -1014,17 +1014,23 @@ def _sampled_frame_indexes(
     fps: float,
     sample_every: int = 0,
     max_samples: int = 120,
+    start_frame: int | None = None,
+    end_frame: int | None = None,
 ) -> list[int]:
     if frame_count <= 0:
         return [0]
+    range_start = max(start_frame or 0, 0)
+    range_end = min(end_frame or (frame_count - 1), frame_count - 1)
+    if range_start > range_end:
+        range_start, range_end = 0, frame_count - 1
     if sample_every and sample_every > 0:
         stride = sample_every
     else:
         stride = max(int(round(fps / 2.0)), 1) if fps > 0 else 12
     cap = max(max_samples, 1)
-    indexes = list(range(0, frame_count, stride))
-    if indexes[-1] != frame_count - 1:
-        indexes.append(frame_count - 1)
+    indexes = list(range(range_start, range_end + 1, stride))
+    if indexes[-1] != range_end:
+        indexes.append(range_end)
     return indexes[:cap]
 
 
@@ -1370,6 +1376,7 @@ def _detect_composite_body(
     sampled_indexes = _sampled_frame_indexes(
         project.video.frame_count, project.video.fps,
         sample_every=sample_every, max_samples=max_samples,
+        start_frame=payload.get("start_frame"), end_frame=payload.get("end_frame"),
     )
     report("sampling_frames", 28.0, "Sampling frame indexes", current=0, total=len(sampled_indexes))
 
@@ -1577,6 +1584,7 @@ def detect_project_video(project: ProjectDocument, payload: dict) -> DetectionSu
     sampled_indexes = _sampled_frame_indexes(
         project.video.frame_count, project.video.fps,
         sample_every=sample_every, max_samples=max_samples,
+        start_frame=payload.get("start_frame"), end_frame=payload.get("end_frame"),
     )
     report("sampling_frames", 30.0, "Sampling frame indexes", current=0, total=len(sampled_indexes))
     detector_tracks: list[MaskTrack] = []

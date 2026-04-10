@@ -9,6 +9,8 @@ type TimelineViewProps = {
   selectedTrackId: string | null;
   selectedKeyframeFrame: number | null;
   currentFrame: number;
+  inFrame: number | null;
+  outFrame: number | null;
   busy: boolean;
   onSelectTrack: (trackId: string) => void;
   onSelectKeyframe: (trackId: string, frameIndex: number) => void;
@@ -48,6 +50,8 @@ export function TimelineView({
   selectedTrackId,
   selectedKeyframeFrame,
   currentFrame,
+  inFrame,
+  outFrame,
   busy,
   onSelectTrack,
   onSelectKeyframe,
@@ -104,6 +108,8 @@ export function TimelineView({
 
   const ticks = generateTicks(totalFrames);
   const playheadPct = framePct(currentFrame);
+  const inPct = inFrame !== null ? framePct(inFrame) : null;
+  const outPct = outFrame !== null ? framePct(outFrame) : null;
 
   // Time display: F123 / 00:04.10 when fps is known
   let timeDisplay = `F ${currentFrame}`;
@@ -179,6 +185,12 @@ export function TimelineView({
                   {label}
                 </div>
               ))}
+              {/* In/Out range markers */}
+              {inPct !== null && <div className="nle-tlv__in-marker" style={{ left: inPct }} title={`In: F${inFrame}`} />}
+              {outPct !== null && <div className="nle-tlv__out-marker" style={{ left: outPct }} title={`Out: F${outFrame}`} />}
+              {inPct !== null && outPct !== null && (
+                <div className="nle-tlv__range-highlight" style={{ left: inPct, width: `calc(${outPct} - ${inPct})` }} />
+              )}
               {/* Playhead indicator on ruler */}
               <div className="nle-tlv__playhead-head" style={{ left: playheadPct }} />
             </div>

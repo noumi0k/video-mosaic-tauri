@@ -2722,6 +2722,28 @@ details.nle-inspector-section:not([open]) > .nle-inspector-section__body {
   border-top: 6px solid var(--playhead);
 }
 
+/* In/Out range markers */
+.nle-tlv__in-marker,
+.nle-tlv__out-marker {
+  position: absolute;
+  top: 0;
+  width: 2px;
+  height: 100%;
+  z-index: 4;
+  pointer-events: none;
+  transform: translateX(-50%);
+}
+.nle-tlv__in-marker { background: #4caf50; }
+.nle-tlv__out-marker { background: #f44336; }
+.nle-tlv__range-highlight {
+  position: absolute;
+  top: 0;
+  height: 100%;
+  background: rgba(76, 175, 80, 0.12);
+  z-index: 1;
+  pointer-events: none;
+}
+
 /* Playhead vertical line in each lane */
 .nle-tlv__playhead-lane {
   position: absolute;

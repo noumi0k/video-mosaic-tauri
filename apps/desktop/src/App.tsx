@@ -192,6 +192,10 @@ export function App() {
   const [exportResolution, setExportResolution] = useState("source");
   const [exportMosaicStrength, setExportMosaicStrength] = useState(12);
 
+  // In/Out frame markers for range detection
+  const [inFrame, setInFrame] = useState<number | null>(null);
+  const [outFrame, setOutFrame] = useState<number | null>(null);
+
   // ジョブ通知の dismiss 管理
   const [dismissedJobIds, setDismissedJobIds] = useState<Set<string>>(new Set());
   const scheduledDismissRef = useRef<Set<string>>(new Set());
@@ -611,7 +615,7 @@ export function App() {
     const categories = detectSelectedCategories.filter((cat) =>
       isCategorySupportedByBackend(detectBackend, cat),
     );
-    const response = await startDetectJob(backend, {
+    const detectPayload: Record<string, unknown> = {
       project_path: project.project_path,
       project: project.project_path ? undefined : project,
       backend: detectBackend,
@@ -625,7 +629,13 @@ export function App() {
       precise_face_contour: detectPreciseFaceContour,
       vram_saving_mode: detectVramSavingMode,
       enabled_label_categories: categories,
-    });
+    };
+    // Range detection: pass in/out frame to limit detection scope.
+    if (inFrame !== null && outFrame !== null && inFrame < outFrame) {
+      detectPayload.start_frame = inFrame;
+      detectPayload.end_frame = outFrame;
+    }
+    const response = await startDetectJob(backend, detectPayload);
     if (!response.ok) {
       setErrorMessage(prettyError(response.error));
       return;
@@ -818,6 +828,18 @@ export function App() {
       if (e.key === "n" && !ctrl && !shift) {
         e.preventDefault();
         void handleCreateTrack();
+        return;
+      }
+      // I: Set in frame
+      if (e.key === "i" && !ctrl && !shift) {
+        e.preventDefault();
+        setInFrame(currentFrame);
+        return;
+      }
+      // O: Set out frame
+      if (e.key === "o" && !ctrl && !shift) {
+        e.preventDefault();
+        setOutFrame(currentFrame);
         return;
       }
       // Delete: Delete selected track
@@ -1159,6 +1181,13 @@ export function App() {
           </select>
           <button className="nle-btn nle-btn--accent" onClick={() => void handleExport()} disabled={!project || Boolean(activeExportJobId)}>{uiText.actions.export}</button>
         </div>
+        {(inFrame !== null || outFrame !== null) && (
+          <div className="nle-header__group" style={{ fontSize: "0.85em", gap: 4 }}>
+            <span>I:{inFrame ?? "-"}</span>
+            <span>O:{outFrame ?? "-"}</span>
+            <button className="nle-btn nle-btn--small" onClick={() => { setInFrame(null); setOutFrame(null); }} title="Clear I/O range">Clear</button>
+          </div>
+        )}
         <div className="nle-header__spacer" />
         <span className={`nle-header__badge ${startupReady ? "nle-header__badge--ready" : "nle-header__badge--warning"}`}>
           {startupReady ? uiText.app.backendReady : uiText.app.backendNeedsSetup}
@@ -1334,6 +1363,8 @@ export function App() {
           selectedTrackId={selectedTrackId}
           selectedKeyframeFrame={selectedKeyframeFrame}
           currentFrame={currentFrame}
+          inFrame={inFrame}
+          outFrame={outFrame}
           busy={keyframeEditorBusy}
           onSelectTrack={(trackId) => {
             setSelectedTrackId(trackId);
