@@ -7,6 +7,8 @@ type TrackDetailPanelProps = {
   onSelectKeyframe: (trackId: string, frameIndex: number) => void;
   onToggleVisible: () => void;
   onDeleteTrack?: () => void;
+  onDuplicateTrack?: () => void;
+  onSplitTrack?: () => void;
 };
 
 export function TrackDetailPanel({
@@ -16,6 +18,8 @@ export function TrackDetailPanel({
   onSelectKeyframe,
   onToggleVisible,
   onDeleteTrack,
+  onDuplicateTrack,
+  onSplitTrack,
 }: TrackDetailPanelProps) {
   if (!track) {
     return <div className="nle-empty">トラックを選択すると詳細を表示できます。</div>;
@@ -40,9 +44,19 @@ export function TrackDetailPanel({
         <button className="nle-btn nle-btn--small" onClick={onToggleVisible}>
           {track.visible ? "トラックを非表示" : "トラックを表示"}
         </button>
+        {onDuplicateTrack && (
+          <button className="nle-btn nle-btn--small" onClick={onDuplicateTrack}>
+            複製
+          </button>
+        )}
+        {onSplitTrack && (
+          <button className="nle-btn nle-btn--small" onClick={onSplitTrack}>
+            分割
+          </button>
+        )}
         {onDeleteTrack && (
           <button className="nle-btn nle-btn--small" onClick={onDeleteTrack} style={{ color: "#e55" }}>
-            トラックを削除
+            削除
           </button>
         )}
       </div>

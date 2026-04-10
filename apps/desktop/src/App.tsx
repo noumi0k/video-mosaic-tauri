@@ -436,6 +436,69 @@ export function App() {
     setSelectedKeyframeFrame(null);
   }
 
+  async function handleDuplicateTrack() {
+    if (!selectedTrackId || !project) return;
+    const projectPath = await ensureEditableProjectPath();
+    if (!projectPath) return;
+    const sourceTrack = project.tracks.find((t) => t.track_id === selectedTrackId);
+    if (!sourceTrack) return;
+    const newTrackId = `track-dup-${Date.now()}`;
+    const duplicated = {
+      ...structuredClone(sourceTrack),
+      track_id: newTrackId,
+      label: `${sourceTrack.label} (copy)`,
+    };
+    const updatedProject = { ...project, tracks: [...project.tracks, duplicated] };
+    const response = await backend<MutationCommandData>("save-project", {
+      project_path: projectPath,
+      project: updatedProject,
+    });
+    if (!response.ok) {
+      setErrorMessage(prettyError(response.error));
+      return;
+    }
+    applyMutationResult(response.data);
+    setSelectedTrackId(newTrackId);
+  }
+
+  async function handleSplitTrack() {
+    if (!selectedTrackId || !project) return;
+    const projectPath = await ensureEditableProjectPath();
+    if (!projectPath) return;
+    const sourceTrack = project.tracks.find((t) => t.track_id === selectedTrackId);
+    if (!sourceTrack || sourceTrack.keyframes.length < 2) {
+      setErrorMessage("Split requires at least 2 keyframes.");
+      return;
+    }
+    // Split at the current frame: keyframes before → track A, keyframes at/after → track B.
+    const before = sourceTrack.keyframes.filter((kf) => kf.frame_index < currentFrame);
+    const after = sourceTrack.keyframes.filter((kf) => kf.frame_index >= currentFrame);
+    if (before.length === 0 || after.length === 0) {
+      setErrorMessage("Cannot split: all keyframes are on one side of the playhead.");
+      return;
+    }
+    const newTrackId = `track-split-${Date.now()}`;
+    const trackA = { ...structuredClone(sourceTrack), keyframes: before };
+    const trackB = {
+      ...structuredClone(sourceTrack),
+      track_id: newTrackId,
+      label: `${sourceTrack.label} (B)`,
+      keyframes: after,
+    };
+    const updatedTracks = project.tracks.map((t) => (t.track_id === selectedTrackId ? trackA : t));
+    updatedTracks.push(trackB);
+    const updatedProject = { ...project, tracks: updatedTracks };
+    const response = await backend<MutationCommandData>("save-project", {
+      project_path: projectPath,
+      project: updatedProject,
+    });
+    if (!response.ok) {
+      setErrorMessage(prettyError(response.error));
+      return;
+    }
+    applyMutationResult(response.data);
+  }
+
   async function handleToggleTrackVisible() {
     if (!selectedTrackId || !readModel) return;
     const projectPath = await ensureEditableProjectPath();
@@ -1431,6 +1494,8 @@ export function App() {
                   handleSeekFrame(frameIndex);
                 }}
                 onToggleVisible={() => void handleToggleTrackVisible()}
+                onDuplicateTrack={() => void handleDuplicateTrack()}
+                onSplitTrack={() => void handleSplitTrack()}
                 onDeleteTrack={() => void handleDeleteTrack()}
               />
             </div>
