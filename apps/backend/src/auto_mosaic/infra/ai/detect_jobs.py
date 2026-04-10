@@ -215,6 +215,26 @@ def reconcile_job_state(job_id: str) -> dict[str, Any] | None:
     if _is_worker_alive(worker_pid):
         return status
 
+    # Worker is dead.  Re-check for result.json: on Windows with
+    # DETACHED_PROCESS the file may not have been visible at the top-of-function
+    # check but becomes visible after the process exits.
+    if result_path(job_id).exists():
+        completed_status = build_status(
+            job_id=job_id,
+            state="succeeded",
+            stage="finalizing",
+            percent=100.0,
+            message="Detection completed",
+            current=int(status.get("current") or 0),
+            total=int(status.get("total") or 0),
+            error=None,
+            result_available=True,
+            worker_pid=worker_pid or None,
+        )
+        write_status(job_id, completed_status)
+        clear_runtime_state(job_id)
+        return read_status(job_id)
+
     interrupted_message = (
         "Detection was interrupted after a cancel request."
         if cancel_flag_path(job_id).exists()

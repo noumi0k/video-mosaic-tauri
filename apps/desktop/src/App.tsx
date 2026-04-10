@@ -654,7 +654,10 @@ export function App() {
       .filter(
         (job) =>
           isActiveDetectState(job.state) ||
-          (hasCollectableDetectResult(job) && !processedDetectJobsRef.current.has(job.job_id)),
+          // Keep polling terminal jobs that haven't been collected yet.
+          // "interrupted" jobs may be reconciled to "succeeded" on the next poll
+          // when the backend discovers result.json after worker exit.
+          (isTerminalDetectState(job.state) && !processedDetectJobsRef.current.has(job.job_id)),
       )
       .map((job) => job.job_id);
     if (!pendingJobIds.length) return;
