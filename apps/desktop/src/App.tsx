@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import { open, save } from "@tauri-apps/plugin-dialog";
 import { CanvasStagePanel } from "./components/CanvasStagePanel";
@@ -35,6 +35,14 @@ import {
   resolveForEditing,
   type ResolveReason,
 } from "./maskShapeResolver";
+import {
+  createHistorySnapshot,
+  pushHistory,
+  resetHistory,
+  undoHistory,
+  redoHistory,
+  type EditorHistoryState,
+} from "./editorHistory";
 import { assertRawFilePathForBackend } from "./pathUtils";
 import { uiText } from "./uiText";
 import type {
@@ -168,6 +176,11 @@ export function App() {
   const [previewKeyframeOverride, setPreviewKeyframeOverride] = useState<Keyframe | null>(null);
   const [keyframeRemoteError, setKeyframeRemoteError] = useState("");
 
+  // Undo/Redo history (project snapshot stack)
+  const [history, setHistory] = useState<EditorHistoryState>({ past: [], present: null, future: [] });
+  const canUndo = history.past.length > 0;
+  const canRedo = history.future.length > 0;
+
   const [runtimeJobs, setRuntimeJobs] = useState<Record<string, RuntimeJobSummary>>({});
   const [detectJobs, setDetectJobs] = useState<Record<string, DetectJobSummary>>({});
   const [activeExportJobId, setActiveExportJobId] = useState<string | null>(null);
@@ -220,6 +233,14 @@ export function App() {
   }
 
   function syncProjectState(result: MutationResult, options?: { dirty?: boolean; previewPath?: string | null }) {
+    // Push current state to history before sync (e.g. detect result apply).
+    if (project && readModel && options?.dirty) {
+      const snapshot = createHistorySnapshot(project, readModel, {
+        trackId: selectedTrackId,
+        frameIndex: selectedKeyframeFrame,
+      });
+      setHistory((prev) => pushHistory(prev, snapshot));
+    }
     setProject(result.project);
     setReadModel(result.read_model);
     setProjectDirty(Boolean(options?.dirty));
@@ -238,6 +259,14 @@ export function App() {
   }
 
   function applyMutationResult(result: MutationCommandData) {
+    // Push current state to history before applying mutation.
+    if (project && readModel) {
+      const snapshot = createHistorySnapshot(project, readModel, {
+        trackId: selectedTrackId,
+        frameIndex: selectedKeyframeFrame,
+      });
+      setHistory((prev) => pushHistory(prev, snapshot));
+    }
     setProject(result.project);
     setReadModel(result.read_model);
     setSelectedTrackId(result.selection.track_id);
@@ -246,6 +275,33 @@ export function App() {
       setCurrentFrame(result.selection.frame_index);
     }
     setProjectDirty(true);
+  }
+
+  function handleUndo() {
+    if (!canUndo) return;
+    const next = undoHistory(history);
+    setHistory(next);
+    if (next.present) {
+      setProject(next.present.project);
+      setReadModel(next.present.readModel);
+      setSelectedTrackId(next.present.selection.trackId);
+      setSelectedKeyframeFrame(next.present.selection.frameIndex);
+      setProjectDirty(true);
+    }
+  }
+
+  function handleRedo() {
+    if (!canRedo) return;
+    // Push current state before redo (already handled by redoHistory).
+    const next = redoHistory(history);
+    setHistory(next);
+    if (next.present) {
+      setProject(next.present.project);
+      setReadModel(next.present.readModel);
+      setSelectedTrackId(next.present.selection.trackId);
+      setSelectedKeyframeFrame(next.present.selection.frameIndex);
+      setProjectDirty(true);
+    }
   }
 
   async function createProjectFromVideo(video: VideoMetadata) {
@@ -620,6 +676,21 @@ export function App() {
     void runDoctor();
   }, []);
 
+  // Keyboard shortcuts: Ctrl+Z (undo), Ctrl+Shift+Z / Ctrl+Y (redo)
+  useEffect(() => {
+    function onKeyDown(e: KeyboardEvent) {
+      if ((e.ctrlKey || e.metaKey) && e.key === "z" && !e.shiftKey) {
+        e.preventDefault();
+        handleUndo();
+      } else if ((e.ctrlKey || e.metaKey) && (e.key === "Z" || e.key === "y")) {
+        e.preventDefault();
+        handleRedo();
+      }
+    }
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  });
+
   useEffect(() => {
     const activeJobIds = Object.values(runtimeJobs).filter((job) => isActiveRuntimeState(job.state)).map((job) => job.job_id);
     if (!activeJobIds.length) return;
@@ -918,6 +989,8 @@ export function App() {
           <button className="nle-btn" onClick={() => void handleOpenVideo()} disabled={Boolean(activeRuntimeByKind.get("open_video"))}>{uiText.actions.openVideo}</button>
           <button className="nle-btn" onClick={() => void handleSetupEnvironment()} disabled={Boolean(activeRuntimeByKind.get("setup_environment"))}>{uiText.actions.setup}</button>
           <button className="nle-btn" onClick={() => void handleFetchModels()} disabled={Boolean(activeRuntimeByKind.get("fetch_models"))}>{uiText.actions.fetchModels}</button>
+          <button className="nle-btn" onClick={handleUndo} disabled={!canUndo} title="Undo (Ctrl+Z)">Undo</button>
+          <button className="nle-btn" onClick={handleRedo} disabled={!canRedo} title="Redo (Ctrl+Shift+Z)">Redo</button>
           <button className="nle-btn" onClick={() => setDetectModalOpen(true)} disabled={!project || Boolean(activeDetectJob)}>{uiText.actions.detect}</button>
           <button className="nle-btn nle-btn--accent" onClick={() => void handleExport()} disabled={!project || Boolean(activeExportJobId)}>{uiText.actions.export}</button>
         </div>
