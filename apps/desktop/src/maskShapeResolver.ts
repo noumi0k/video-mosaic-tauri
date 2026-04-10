@@ -3,10 +3,13 @@ import type { Keyframe, KeyframeShapeType, KeyframeSummary } from "./types";
 // Mirrors backend _INTERPOLATE_MAX_GAP / _FRAME_GAP_REJECT
 const _INTERPOLATE_MAX_GAP = 30;
 
+/** Minimum polygon vertex count for interpolation. */
+const _POLYGON_MIN_VERTICES = 3;
+
 /**
  * Mirrors backend ResolveReason enum.
  * "explicit"       — frame_index has an exact keyframe entry.
- * "interpolated"   — frame is between two ellipse keyframes with gap ≤ 30.
+ * "interpolated"   — frame is between two same-type keyframes with gap ≤ 30.
  * "held_from_prior" — no exact match; shape is held from the preceding keyframe.
  */
 export type ResolveReason = "explicit" | "interpolated" | "held_from_prior";
@@ -188,14 +191,160 @@ export function interpolateEllipse(a: Keyframe, b: Keyframe, frameIdx: number): 
   return _buildInterpolatedKf(frameIdx, "ellipse", bbox, rotation, confidence, opacity);
 }
 
+// ---------------------------------------------------------------------------
+// W6b: interpolatePolygon — mirrors backend interpolate_polygon
+// ---------------------------------------------------------------------------
+
+function _cumulativeArcLengths(points: number[][]): number[] {
+  const n = points.length;
+  const lengths = [0.0];
+  for (let i = 1; i < n; i++) {
+    const dx = points[i]![0]! - points[i - 1]![0]!;
+    const dy = points[i]![1]! - points[i - 1]![1]!;
+    lengths.push(lengths[lengths.length - 1]! + Math.hypot(dx, dy));
+  }
+  const dx = points[0]![0]! - points[n - 1]![0]!;
+  const dy = points[0]![1]! - points[n - 1]![1]!;
+  lengths.push(lengths[lengths.length - 1]! + Math.hypot(dx, dy));
+  return lengths;
+}
+
+function _resamplePolygon(points: number[][], targetCount: number): number[][] {
+  if (points.length < 2 || targetCount < _POLYGON_MIN_VERTICES) return points.map((p) => [...p]);
+  if (points.length === targetCount) return points.map((p) => [...p]);
+
+  const cum = _cumulativeArcLengths(points);
+  const totalLen = cum[cum.length - 1]!;
+  if (totalLen < 1e-9) return Array.from({ length: targetCount }, () => [...points[0]!]);
+
+  const step = totalLen / targetCount;
+  const n = points.length;
+  const closed = [...points.map((p) => [...p]), [...points[0]!]];
+  const result: number[][] = [];
+  let segIdx = 0;
+
+  for (let i = 0; i < targetCount; i++) {
+    const targetLen = i * step;
+    while (segIdx < n && cum[segIdx + 1]! < targetLen) segIdx++;
+    if (segIdx >= n) segIdx = n - 1;
+
+    const segStartLen = cum[segIdx]!;
+    const segEndLen = cum[segIdx + 1]!;
+    const segSpan = segEndLen - segStartLen;
+    const localT = segSpan < 1e-12 ? 0.0 : (targetLen - segStartLen) / segSpan;
+
+    result.push([
+      closed[segIdx]![0]! + (closed[segIdx + 1]![0]! - closed[segIdx]![0]!) * localT,
+      closed[segIdx]![1]! + (closed[segIdx + 1]![1]! - closed[segIdx]![1]!) * localT,
+    ]);
+  }
+  return result;
+}
+
+function _alignPolygonStart(pointsA: number[][], pointsB: number[][]): number[][] {
+  const n = pointsA.length;
+  if (n !== pointsB.length || n === 0) return pointsB.map((p) => [...p]);
+
+  let bestOffset = 0;
+  let bestDist = Infinity;
+  for (let offset = 0; offset < n; offset++) {
+    let total = 0.0;
+    for (let i = 0; i < n; i++) {
+      const j = (i + offset) % n;
+      const dx = pointsA[i]![0]! - pointsB[j]![0]!;
+      const dy = pointsA[i]![1]! - pointsB[j]![1]!;
+      total += dx * dx + dy * dy;
+    }
+    if (total < bestDist) {
+      bestDist = total;
+      bestOffset = offset;
+    }
+  }
+  if (bestOffset === 0) return pointsB.map((p) => [...p]);
+  const rotated = [...pointsB.slice(bestOffset), ...pointsB.slice(0, bestOffset)];
+  return rotated.map((p) => [...p]);
+}
+
+function _preparePolygonPair(
+  pointsA: number[][],
+  pointsB: number[][],
+): [number[][], number[][]] {
+  if (!pointsA.length || !pointsB.length) {
+    return [pointsA.map((p) => [...p]), pointsB.map((p) => [...p])];
+  }
+  const target = Math.max(pointsA.length, pointsB.length);
+  const resampledA = _resamplePolygon(pointsA, target);
+  const resampledB = _resamplePolygon(pointsB, target);
+  const alignedB = _alignPolygonStart(resampledA, resampledB);
+  return [resampledA, alignedB];
+}
+
+function _bboxFromPoints(points: number[][]): number[] {
+  const xs = points.map((p) => p[0]!);
+  const ys = points.map((p) => p[1]!);
+  const minX = Math.min(...xs);
+  const minY = Math.min(...ys);
+  return [minX, minY, Math.max(...xs) - minX, Math.max(...ys) - minY];
+}
+
+/**
+ * Linearly interpolate between two polygon keyframes at frameIdx.
+ *
+ * Mirrors backend interpolate_polygon (W6b):
+ * - Resamples both polygons to equal vertex counts.
+ * - Aligns start vertices to minimise twist.
+ * - Per-vertex linear interpolation.
+ * - bbox derived from interpolated points.
+ */
+export function interpolatePolygon(a: Keyframe, b: Keyframe, frameIdx: number): Keyframe {
+  if (a.shape_type !== "polygon" || b.shape_type !== "polygon") {
+    throw new Error("interpolatePolygon: both keyframes must be polygon");
+  }
+  if (!a.points.length || !b.points.length) {
+    throw new Error("interpolatePolygon: both keyframes must have non-empty points");
+  }
+  if (a.frame_index >= b.frame_index) {
+    throw new Error("interpolatePolygon: a.frame_index must be < b.frame_index");
+  }
+  if (frameIdx < a.frame_index || frameIdx > b.frame_index) {
+    throw new Error("interpolatePolygon: frameIdx out of range");
+  }
+  const span = b.frame_index - a.frame_index;
+  const t = (frameIdx - a.frame_index) / span;
+  if (t === 0.0) return { ...a, points: a.points.map((p) => [...p]), bbox: [...a.bbox] };
+  if (t === 1.0) return { ...b, points: b.points.map((p) => [...p]), bbox: [...b.bbox] };
+
+  const [alignedA, alignedB] = _preparePolygonPair(a.points, b.points);
+  const interpPoints = alignedA.map((pa, i) => [
+    _lerp(pa[0]!, alignedB[i]![0]!, t),
+    _lerp(pa[1]!, alignedB[i]![1]!, t),
+  ]);
+  const interpBbox = _bboxFromPoints(interpPoints);
+
+  return {
+    frame_index: frameIdx,
+    shape_type: "polygon",
+    points: interpPoints,
+    bbox: interpBbox,
+    confidence: _lerp(a.confidence, b.confidence, t),
+    source: "detector",
+    rotation: _lerpRotation(a.rotation, b.rotation, t),
+    opacity: _lerp(a.opacity, b.opacity, t),
+    expand_px: null,
+    feather: null,
+    is_locked: false,
+    contour_points: [],
+  };
+}
+
 /**
  * Return the resolved keyframe and reason for a given frame during editing.
  *
  * Mirrors backend resolve_for_editing (W8):
  * - Returns null for empty track or frameIndex before first keyframe.
  * - Returns { reason: "explicit" } if an exact keyframe exists at frameIndex.
- * - Returns { reason: "interpolated" } if frameIndex lies between two ellipse
- *   keyframes whose gap is ≤ _INTERPOLATE_MAX_GAP (30 frames).
+ * - Returns { reason: "interpolated" } if frameIndex lies between two same-type
+ *   keyframes (ellipse or polygon) whose gap is ≤ _INTERPOLATE_MAX_GAP (30 frames).
  * - Returns { reason: "held_from_prior" } otherwise, including frames beyond the
  *   last keyframe (unlike resolve_for_render, no segment gate is applied here).
  *
@@ -230,11 +379,19 @@ export function resolveForEditing(
 
   if (
     nextKf !== null &&
-    prior.shape_type === "ellipse" &&
-    nextKf.shape_type === "ellipse" &&
+    prior.shape_type === nextKf.shape_type &&
     nextKf.frame_index - prior.frame_index <= _INTERPOLATE_MAX_GAP
   ) {
-    return { keyframe: interpolateEllipse(prior, nextKf, frameIndex), reason: "interpolated" };
+    if (prior.shape_type === "ellipse") {
+      return { keyframe: interpolateEllipse(prior, nextKf, frameIndex), reason: "interpolated" };
+    }
+    if (
+      prior.shape_type === "polygon" &&
+      prior.points.length >= _POLYGON_MIN_VERTICES &&
+      nextKf.points.length >= _POLYGON_MIN_VERTICES
+    ) {
+      return { keyframe: interpolatePolygon(prior, nextKf, frameIndex), reason: "interpolated" };
+    }
   }
 
   return { keyframe: prior, reason: "held_from_prior" };
