@@ -237,6 +237,38 @@ fn resolve_runtime_context(app: &AppHandle) -> Result<RuntimeContext, String> {
         }
     }
 
+    // Dev mode: CARGO_MANIFEST_DIR is set at compile time and always points to
+    // apps/desktop/src-tauri.  From there, ../../backend resolves to apps/backend.
+    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let manifest_backend = manifest_dir.join("..").join("..").join("backend");
+    if manifest_backend.join("src").exists() {
+        let workspace_root = manifest_dir.join("..").join("..").join("..");
+        let venv_scripts = manifest_backend.join(".venv").join(if cfg!(target_os = "windows") {
+            "Scripts"
+        } else {
+            "bin"
+        });
+        let venv_python = venv_scripts.join(if cfg!(target_os = "windows") {
+            "python.exe"
+        } else {
+            "python3"
+        });
+        let python_dir = if venv_python.exists() {
+            Some(venv_scripts)
+        } else {
+            None
+        };
+        return Ok(RuntimeContext {
+            python_executable: resolve_python(python_dir.as_ref()),
+            backend_root: manifest_backend,
+            data_dir: workspace_root.join("apps").join("user-data"),
+            model_dir: workspace_root.join("models"),
+            ffmpeg_path: None,
+            ffprobe_path: None,
+            bundle_mode: false,
+        });
+    }
+
     let current = std::env::current_dir().map_err(|error| error.to_string())?;
     let local = current.join("..").join("backend");
     if local.join("src").exists() {
@@ -245,19 +277,6 @@ fn resolve_runtime_context(app: &AppHandle) -> Result<RuntimeContext, String> {
             backend_root: local.clone(),
             data_dir: current.join("..").join("..").join("user-data"),
             model_dir: current.join("..").join("..").join("models"),
-            ffmpeg_path: None,
-            ffprobe_path: None,
-            bundle_mode: false,
-        });
-    }
-
-    let workspace = current.join("..").join("..").join("apps").join("backend");
-    if workspace.join("src").exists() {
-        return Ok(RuntimeContext {
-            python_executable: resolve_python(None),
-            backend_root: workspace.clone(),
-            data_dir: current.join("..").join("..").join("..").join("user-data"),
-            model_dir: current.join("..").join("..").join("..").join("models"),
             ffmpeg_path: None,
             ffprobe_path: None,
             bundle_mode: false,
