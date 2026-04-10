@@ -546,6 +546,34 @@ export function App() {
     applyMutationResult(response.data);
   }
 
+  async function handleDuplicateKeyframe() {
+    // Duplicate the selected keyframe to the current frame.
+    if (!selectedTrackId || selectedKeyframeFrame === null) return;
+    if (selectedKeyframeFrame === currentFrame) return; // same frame, no-op
+    const sourceKf = selectedTrackDocument?.keyframes.find((kf) => kf.frame_index === selectedKeyframeFrame);
+    if (!sourceKf) return;
+    const projectPath = await ensureEditableProjectPath();
+    if (!projectPath) return;
+    const response = await backend<MutationCommandData>("create-keyframe", {
+      project_path: projectPath,
+      track_id: selectedTrackId,
+      frame_index: currentFrame,
+      source: "manual",
+      shape_type: sourceKf.shape_type,
+      bbox: sourceKf.bbox,
+      points: sourceKf.points,
+      rotation: sourceKf.rotation,
+      opacity: sourceKf.opacity,
+      expand_px: sourceKf.expand_px,
+      feather: sourceKf.feather,
+    });
+    if (!response.ok) {
+      setKeyframeRemoteError(prettyError(response.error));
+      return;
+    }
+    applyMutationResult(response.data);
+  }
+
   async function handleDeleteKeyframe() {
     if (!selectedTrackId || selectedKeyframeFrame === null) return;
     const projectPath = await ensureEditableProjectPath();
@@ -608,6 +636,40 @@ export function App() {
     if (typeof selected !== "string") return;
     assertRawFilePathForBackend(selected, "open-video");
     await startRuntime("open_video", { video_path: selected });
+  }
+
+  async function handleDetectCurrentFrame() {
+    if (!project) return;
+    const categories = detectSelectedCategories.filter((cat) =>
+      isCategorySupportedByBackend(detectBackend, cat),
+    );
+    const response = await startDetectJob(backend, {
+      project_path: project.project_path,
+      project: project.project_path ? undefined : project,
+      backend: detectBackend,
+      device: detectDevice,
+      confidence_threshold: detectThreshold,
+      inference_resolution: detectInferenceResolution,
+      contour_mode: detectContourMode,
+      vram_saving_mode: detectVramSavingMode,
+      enabled_label_categories: categories,
+      sample_every: 1,
+      max_samples: 1,
+      start_frame: currentFrame,
+      end_frame: currentFrame,
+    });
+    if (!response.ok) {
+      setErrorMessage(prettyError(response.error));
+      return;
+    }
+    setDetectJobs((current) => {
+      const next = Object.fromEntries(
+        Object.entries(current).filter(([, job]) => isActiveDetectState(job.state)),
+      );
+      next[response.data.job_id] = response.data.status;
+      return next;
+    });
+    setActivity("Detecting current frame...");
   }
 
   async function handleDetect() {
@@ -761,6 +823,9 @@ export function App() {
       if (ctrl && e.key === "z" && !shift) { e.preventDefault(); handleUndo(); return; }
       // Ctrl+Shift+Z / Ctrl+Y: Redo
       if (ctrl && (e.key === "Z" || e.key === "y")) { e.preventDefault(); handleRedo(); return; }
+      // Ctrl+D: Duplicate keyframe / Ctrl+Shift+D: Detect current frame
+      if (ctrl && e.key === "d" && !shift) { e.preventDefault(); void handleDuplicateKeyframe(); return; }
+      if (ctrl && e.key === "D") { e.preventDefault(); void handleDetectCurrentFrame(); return; }
       // Ctrl+S: Save
       if (ctrl && e.key === "s" && !shift) { e.preventDefault(); void handleSaveProject(false); return; }
       // Ctrl+Shift+S: Save As
@@ -856,6 +921,32 @@ export function App() {
       if (e.key === "Delete" && selectedTrackId) {
         e.preventDefault();
         void handleDeleteTrack();
+        return;
+      }
+      // F1: Show keyboard shortcuts
+      if (e.key === "F1") {
+        e.preventDefault();
+        window.alert(
+          "Keyboard Shortcuts\n" +
+          "─────────────────\n" +
+          "Ctrl+Z: Undo\n" +
+          "Ctrl+Shift+Z / Ctrl+Y: Redo\n" +
+          "Ctrl+S: Save\n" +
+          "Ctrl+Shift+S: Save As\n" +
+          "Ctrl+D: Duplicate keyframe\n" +
+          "Ctrl+Shift+D: Detect current frame\n" +
+          "Arrow Left/Right: ±1 frame (Shift: ±10)\n" +
+          "Space: Play / Pause\n" +
+          "K: Add keyframe\n" +
+          "Shift+K: Delete keyframe\n" +
+          "[ / ]: Prev / Next keyframe\n" +
+          "H: Toggle track visibility\n" +
+          "N: New track\n" +
+          "I: Set in-frame\n" +
+          "O: Set out-frame\n" +
+          "Delete: Delete track\n" +
+          "F1: This help"
+        );
         return;
       }
     }
@@ -1180,8 +1271,8 @@ export function App() {
           <button className="nle-btn" onClick={() => void handleSetupEnvironment()} disabled={Boolean(activeRuntimeByKind.get("setup_environment"))}>{uiText.actions.setup}</button>
           <button className="nle-btn" onClick={() => void handleFetchModels()} disabled={Boolean(activeRuntimeByKind.get("fetch_models"))}>{uiText.actions.fetchModels}</button>
           <button className="nle-btn" onClick={() => void handleCreateTrack()} disabled={!project} title="Add manual track">+ Track</button>
-          <button className="nle-btn" onClick={handleUndo} disabled={!canUndo} title="Undo (Ctrl+Z)">Undo</button>
-          <button className="nle-btn" onClick={handleRedo} disabled={!canRedo} title="Redo (Ctrl+Shift+Z)">Redo</button>
+          <button className="nle-btn" onClick={handleUndo} disabled={!canUndo} title="Undo (Ctrl+Z)">Undo{canUndo ? ` (${history.past.length})` : ""}</button>
+          <button className="nle-btn" onClick={handleRedo} disabled={!canRedo} title="Redo (Ctrl+Shift+Z)">Redo{canRedo ? ` (${history.future.length})` : ""}</button>
           <button className="nle-btn" onClick={() => setDetectModalOpen(true)} disabled={!project || Boolean(activeDetectJob)}>{uiText.actions.detect}</button>
           <select className="nle-select" value={exportResolution} onChange={(e) => setExportResolution(e.target.value)} title="Export resolution">
             <option value="source">Source</option>
