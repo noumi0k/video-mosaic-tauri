@@ -50,6 +50,9 @@ class DetectCancelledError(RuntimeError):
 # ---------------------------------------------------------------------------
 # NudeNet v3 class label order (matches 320n.onnx / 640m.onnx output columns)
 # ---------------------------------------------------------------------------
+# NudeNet v3.4 class labels — read from 320n.onnx model metadata `names`.
+# WARNING: class indexes changed between NudeNet versions. These MUST match
+# the model file. Verified against 320n.onnx metadata 2024-06-29 (v8.2.46).
 _NUDENET_LABELS: list[str] = [
     "FEMALE_GENITALIA_COVERED",   # 0
     "FACE_FEMALE",                # 1
@@ -60,11 +63,15 @@ _NUDENET_LABELS: list[str] = [
     "ANUS_EXPOSED",               # 6
     "FEET_EXPOSED",               # 7
     "BELLY_COVERED",              # 8
-    "BELLY_EXPOSED",              # 9
-    "MALE_GENITALIA_EXPOSED",     # 10
-    "ANUS_COVERED",               # 11
-    "FEMALE_BREAST_COVERED",      # 12
-    "BUTTOCKS_COVERED",           # 13
+    "FEET_COVERED",               # 9
+    "ARMPITS_COVERED",            # 10
+    "ARMPITS_EXPOSED",            # 11
+    "FACE_MALE",                  # 12
+    "BELLY_EXPOSED",              # 13
+    "MALE_GENITALIA_EXPOSED",     # 14
+    "ANUS_COVERED",               # 15
+    "FEMALE_BREAST_COVERED",      # 16
+    "BUTTOCKS_COVERED",           # 17
 ]
 
 # P1-1: The product-facing category set is the 5 items below. These are the
@@ -72,21 +79,21 @@ _NUDENET_LABELS: list[str] = [
 # which of these it can actually handle (see _BACKEND_CATEGORY_SUPPORT) and
 # anything not supported is silently ignored.
 #
-# NudeNet coverage:
-#   - male_genitalia    -> MALE_GENITALIA_EXPOSED
-#   - female_genitalia  -> FEMALE_GENITALIA_EXPOSED
-#   - female_face       -> FACE_FEMALE
-#   - male_face         -> not supported (NudeNet only has FACE_FEMALE)
-#   - intercourse       -> not supported (no NudeNet class for it)
+# NudeNet v3.4 coverage (verified against 320n.onnx model metadata):
+#   - male_genitalia    -> class 14: MALE_GENITALIA_EXPOSED
+#   - female_genitalia  -> class 4:  FEMALE_GENITALIA_EXPOSED
+#   - female_face       -> class 1:  FACE_FEMALE
+#   - male_face         -> class 12: FACE_MALE (added in v3.4)
+#   - intercourse       -> not in NudeNet
 #
-# EraX coverage (planned, not wired yet in P1-1):
+# EraX coverage:
 #   - male_genitalia / female_genitalia / intercourse
 #   - faces are NOT covered by EraX
 _NUDENET_CATEGORY_CLASS_INDEXES: dict[str, list[int]] = {
-    "male_genitalia":    [10],   # MALE_GENITALIA_EXPOSED
+    "male_genitalia":    [14],   # MALE_GENITALIA_EXPOSED (v3.4 index)
     "female_genitalia":  [4],    # FEMALE_GENITALIA_EXPOSED
     "intercourse":       [],     # not in NudeNet
-    "male_face":         [],     # not in NudeNet
+    "male_face":         [12],   # FACE_MALE (new in v3.4)
     "female_face":       [1],    # FACE_FEMALE
 }
 
@@ -94,8 +101,8 @@ _NUDENET_CATEGORY_CLASS_INDEXES: dict[str, list[int]] = {
 # pipeline uses this to filter the payload so a user cannot ask NudeNet to
 # find "intercourse" and then wonder why the run came back empty.
 _BACKEND_CATEGORY_SUPPORT: dict[str, set[str]] = {
-    "nudenet_320n": {"male_genitalia", "female_genitalia", "female_face"},
-    "nudenet_640m": {"male_genitalia", "female_genitalia", "female_face"},
+    "nudenet_320n": {"male_genitalia", "female_genitalia", "female_face", "male_face"},
+    "nudenet_640m": {"male_genitalia", "female_genitalia", "female_face", "male_face"},
     "erax_v1_1":    {"male_genitalia", "female_genitalia", "intercourse"},
     # "composite" is the union of what the constituent backends can produce.
     # The orchestration layer selects only the detectors actually needed for

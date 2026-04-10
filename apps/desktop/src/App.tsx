@@ -1393,18 +1393,28 @@ export function App() {
         <section className="nle-panel-section nle-panel-section--grow">
           <div className="nle-panel-header">{uiText.panels.models}</div>
           <div className="nle-panel-body">
-            {(doctor?.models?.required ?? []).length ? (
-              <ul className="nle-track-list">
-                {(doctor?.models?.required ?? []).map((item) => (
-                  <li key={item.name} className="nle-track-item">
-                    <span className="nle-track-item__name">{item.name}</span>
-                    <span className="nle-track-item__meta">{item.exists ? uiText.models.ready : uiText.models.missing}</span>
-                  </li>
-                ))}
-              </ul>
-            ) : (
-              <div className="nle-empty">{uiText.models.empty}</div>
-            )}
+            {(() => {
+              const allModels = [
+                ...(doctor?.models?.required ?? []).map((m) => ({ ...m, _required: true })),
+                ...(doctor?.models?.optional ?? []).map((m) => ({ ...m, _required: false })),
+              ];
+              if (!allModels.length) return <div className="nle-empty">{uiText.models.empty}</div>;
+              return (
+                <ul className="nle-track-list">
+                  {allModels.map((item) => (
+                    <li key={item.name} className="nle-track-item">
+                      <span className="nle-track-item__name">
+                        {item.name}
+                        {item._required && <span style={{ color: "#e55", marginLeft: 4, fontSize: "0.8em" }}>*</span>}
+                      </span>
+                      <span className="nle-track-item__meta" style={{ color: item.exists ? "#4caf50" : "#999" }}>
+                        {item.exists ? uiText.models.ready : uiText.models.missing}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              );
+            })()}
           </div>
         </section>
       </aside>

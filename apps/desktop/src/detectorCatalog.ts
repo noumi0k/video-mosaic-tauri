@@ -55,8 +55,8 @@ export const DETECTOR_OPTIONS: DetectorOption[] = [
     bundled: true,
     modelNames: ["320n.onnx"],
     description: "初回導線で使う既定の検出モデルです。",
-    // NudeNet v3 classes map cleanly to genitalia + female face only.
-    supportedCategories: ["male_genitalia", "female_genitalia", "female_face"],
+    // NudeNet v3.4 classes: genitalia + face (both male and female).
+    supportedCategories: ["male_genitalia", "female_genitalia", "female_face", "male_face"],
   },
   {
     key: "nudenet_640m",
@@ -65,7 +65,7 @@ export const DETECTOR_OPTIONS: DetectorOption[] = [
     required: false,
     modelNames: ["640m.onnx"],
     description: "320n より高精度ですが、推論は重めです。",
-    supportedCategories: ["male_genitalia", "female_genitalia", "female_face"],
+    supportedCategories: ["male_genitalia", "female_genitalia", "female_face", "male_face"],
   },
   {
     key: "erax_v1_1",
