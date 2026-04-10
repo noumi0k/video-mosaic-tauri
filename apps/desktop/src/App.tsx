@@ -384,6 +384,42 @@ export function App() {
     return handleSaveProject(false);
   }
 
+  async function handleCreateTrack() {
+    if (!project) return;
+    const projectPath = await ensureEditableProjectPath();
+    if (!projectPath) return;
+    const response = await backend<MutationCommandData>("create-track", {
+      project_path: projectPath,
+      shape_type: "ellipse",
+      frame_index: currentFrame,
+    });
+    if (!response.ok) {
+      setErrorMessage(prettyError(response.error));
+      return;
+    }
+    applyMutationResult(response.data);
+  }
+
+  async function handleDeleteTrack() {
+    if (!selectedTrackId || !project) return;
+    const projectPath = await ensureEditableProjectPath();
+    if (!projectPath) return;
+    // Remove track by filtering it out and saving
+    const updatedTracks = project.tracks.filter((t) => t.track_id !== selectedTrackId);
+    const updatedProject = { ...project, tracks: updatedTracks };
+    const response = await backend<MutationCommandData>("save-project", {
+      project_path: projectPath,
+      project: updatedProject,
+    });
+    if (!response.ok) {
+      setErrorMessage(prettyError(response.error));
+      return;
+    }
+    applyMutationResult(response.data);
+    setSelectedTrackId(null);
+    setSelectedKeyframeFrame(null);
+  }
+
   async function handleToggleTrackVisible() {
     if (!selectedTrackId || !readModel) return;
     const projectPath = await ensureEditableProjectPath();
@@ -989,6 +1025,7 @@ export function App() {
           <button className="nle-btn" onClick={() => void handleOpenVideo()} disabled={Boolean(activeRuntimeByKind.get("open_video"))}>{uiText.actions.openVideo}</button>
           <button className="nle-btn" onClick={() => void handleSetupEnvironment()} disabled={Boolean(activeRuntimeByKind.get("setup_environment"))}>{uiText.actions.setup}</button>
           <button className="nle-btn" onClick={() => void handleFetchModels()} disabled={Boolean(activeRuntimeByKind.get("fetch_models"))}>{uiText.actions.fetchModels}</button>
+          <button className="nle-btn" onClick={() => void handleCreateTrack()} disabled={!project} title="Add manual track">+ Track</button>
           <button className="nle-btn" onClick={handleUndo} disabled={!canUndo} title="Undo (Ctrl+Z)">Undo</button>
           <button className="nle-btn" onClick={handleRedo} disabled={!canRedo} title="Redo (Ctrl+Shift+Z)">Redo</button>
           <button className="nle-btn" onClick={() => setDetectModalOpen(true)} disabled={!project || Boolean(activeDetectJob)}>{uiText.actions.detect}</button>
@@ -1136,6 +1173,7 @@ export function App() {
                   handleSeekFrame(frameIndex);
                 }}
                 onToggleVisible={() => void handleToggleTrackVisible()}
+                onDeleteTrack={() => void handleDeleteTrack()}
               />
             </div>
           </details>

@@ -6,6 +6,7 @@ type TrackDetailPanelProps = {
   selectedKeyframeFrame: number | null;
   onSelectKeyframe: (trackId: string, frameIndex: number) => void;
   onToggleVisible: () => void;
+  onDeleteTrack?: () => void;
 };
 
 export function TrackDetailPanel({
@@ -14,6 +15,7 @@ export function TrackDetailPanel({
   selectedKeyframeFrame,
   onSelectKeyframe,
   onToggleVisible,
+  onDeleteTrack,
 }: TrackDetailPanelProps) {
   if (!track) {
     return <div className="nle-empty">トラックを選択すると詳細を表示できます。</div>;
@@ -34,10 +36,15 @@ export function TrackDetailPanel({
       <div className="nle-meta-row"><span className="nle-meta-row__label">範囲</span><span className="nle-meta-row__value">{track.start_frame ?? "-"} - {track.end_frame ?? "-"}</span></div>
       <div className="nle-meta-row"><span className="nle-meta-row__label">キーフレーム</span><span className="nle-meta-row__value">{track.keyframe_count}</span></div>
       <div className="nle-meta-row"><span className="nle-meta-row__label">カバー率</span><span className="nle-meta-row__value">{coveragePercent.toFixed(2)}%</span></div>
-      <div style={{ marginTop: 8 }}>
+      <div style={{ marginTop: 8, display: "flex", gap: 6 }}>
         <button className="nle-btn nle-btn--small" onClick={onToggleVisible}>
           {track.visible ? "トラックを非表示" : "トラックを表示"}
         </button>
+        {onDeleteTrack && (
+          <button className="nle-btn nle-btn--small" onClick={onDeleteTrack} style={{ color: "#e55" }}>
+            トラックを削除
+          </button>
+        )}
       </div>
       <div style={{ marginTop: 10 }}>
         <strong style={{ display: "block", marginBottom: 6 }}>キーフレーム一覧</strong>
