@@ -314,6 +314,26 @@ export function CanvasStagePanel({
               className={`canvas-stage__polygon ${isEditablePolygon ? "canvas-stage__polygon--editable" : ""}`}
               points={activePoints.map(([x, y]) => `${x},${y}`).join(" ")}
               onPointerDown={isEditablePolygon ? beginPolygonMove : undefined}
+              onDoubleClick={isEditablePolygon ? (event) => {
+                // Double-click on polygon edge → add vertex at nearest edge midpoint
+                const svg = (event.target as SVGElement).closest("svg");
+                if (!svg || !activePoints || activePoints.length < 3) return;
+                const rect = svg.getBoundingClientRect();
+                const clickX = (event.clientX - rect.left) / rect.width;
+                const clickY = (event.clientY - rect.top) / rect.height;
+                // Find nearest edge
+                let bestIdx = 0;
+                let bestDist = Infinity;
+                for (let i = 0; i < activePoints.length; i++) {
+                  const a = activePoints[i]!;
+                  const b = activePoints[(i + 1) % activePoints.length]!;
+                  const mx = (a[0] + b[0]) / 2;
+                  const my = (a[1] + b[1]) / 2;
+                  const d = Math.hypot(clickX - mx, clickY - my);
+                  if (d < bestDist) { bestDist = d; bestIdx = i; }
+                }
+                void handleAddVertex(bestIdx);
+              } : undefined}
             />
           </svg>
         ) : null}

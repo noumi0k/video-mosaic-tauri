@@ -743,6 +743,16 @@ export function App() {
 
   async function handleDetect() {
     if (!project) return;
+    // Overwrite confirmation when tracks already exist
+    if (project.tracks.length > 0) {
+      const manualCount = project.tracks.filter((t) => t.user_edited || t.source === "manual").length;
+      const msg = manualCount > 0
+        ? `${project.tracks.length} 件のトラックが存在します（手動編集 ${manualCount} 件含む）。\n\n` +
+          "「OK」→ 手動編集を保護して再検出\n" +
+          "「キャンセル」→ 中止"
+        : `${project.tracks.length} 件のトラックが存在します。\n再検出すると上書きされます。続行しますか？`;
+      if (!window.confirm(msg)) return;
+    }
     // Only send categories the selected backend actually supports
     const categories = detectSelectedCategories.filter((cat) =>
       isCategorySupportedByBackend(detectBackend, cat),
@@ -1004,25 +1014,25 @@ export function App() {
       if (e.key === "F1") {
         e.preventDefault();
         window.alert(
-          "Keyboard Shortcuts\n" +
-          "─────────────────\n" +
-          "Ctrl+Z: Undo\n" +
-          "Ctrl+Shift+Z / Ctrl+Y: Redo\n" +
-          "Ctrl+S: Save\n" +
-          "Ctrl+Shift+S: Save As\n" +
-          "Ctrl+D: Duplicate keyframe\n" +
-          "Ctrl+Shift+D: Detect current frame\n" +
-          "Arrow Left/Right: ±1 frame (Shift: ±10)\n" +
-          "Space: Play / Pause\n" +
-          "K: Add keyframe\n" +
-          "Shift+K: Delete keyframe\n" +
-          "[ / ]: Prev / Next keyframe\n" +
-          "H: Toggle track visibility\n" +
-          "N: New track\n" +
-          "I: Set in-frame\n" +
-          "O: Set out-frame\n" +
-          "Delete: Delete track\n" +
-          "F1: This help"
+          "キーボードショートカット一覧\n" +
+          "──────────────────────\n" +
+          "Ctrl+Z: 元に戻す\n" +
+          "Ctrl+Shift+Z / Ctrl+Y: やり直す\n" +
+          "Ctrl+S: 保存\n" +
+          "Ctrl+Shift+S: 名前を付けて保存\n" +
+          "Ctrl+D: キーフレームを複製\n" +
+          "Ctrl+Shift+D: 現在フレームを検出\n" +
+          "← / →: ±1 フレーム (Shift: ±10)\n" +
+          "Space: 再生 / 一時停止\n" +
+          "K: キーフレーム追加\n" +
+          "Shift+K: キーフレーム削除\n" +
+          "[ / ]: 前 / 次のキーフレーム\n" +
+          "H: トラック表示切替\n" +
+          "N: 新規トラック\n" +
+          "I: イン点を設定\n" +
+          "O: アウト点を設定\n" +
+          "Delete: トラック削除\n" +
+          "F1: このヘルプ"
         );
         return;
       }
@@ -1347,9 +1357,9 @@ export function App() {
           <button className="nle-btn" onClick={() => void handleOpenVideo()} disabled={Boolean(activeRuntimeByKind.get("open_video"))}>{uiText.actions.openVideo}</button>
           <button className="nle-btn" onClick={() => void handleSetupEnvironment()} disabled={Boolean(activeRuntimeByKind.get("setup_environment"))}>{uiText.actions.setup}</button>
           <button className="nle-btn" onClick={() => void handleFetchModels()} disabled={Boolean(activeRuntimeByKind.get("fetch_models"))}>{uiText.actions.fetchModels}</button>
-          <button className="nle-btn" onClick={() => void handleCreateTrack()} disabled={!project} title="Add manual track">+ Track</button>
-          <button className="nle-btn" onClick={handleUndo} disabled={!canUndo} title="Undo (Ctrl+Z)">Undo{canUndo ? ` (${history.past.length})` : ""}</button>
-          <button className="nle-btn" onClick={handleRedo} disabled={!canRedo} title="Redo (Ctrl+Shift+Z)">Redo{canRedo ? ` (${history.future.length})` : ""}</button>
+          <button className="nle-btn" onClick={() => void handleCreateTrack()} disabled={!project} title="手動トラック追加 (N)">+ トラック</button>
+          <button className="nle-btn" onClick={handleUndo} disabled={!canUndo} title="元に戻す (Ctrl+Z)">戻す{canUndo ? ` (${history.past.length})` : ""}</button>
+          <button className="nle-btn" onClick={handleRedo} disabled={!canRedo} title="やり直す (Ctrl+Shift+Z)">やり直す{canRedo ? ` (${history.future.length})` : ""}</button>
           <button className="nle-btn" onClick={() => setDetectModalOpen(true)} disabled={!project || Boolean(activeDetectJob)}>{uiText.actions.detect}</button>
           <button className="nle-btn nle-btn--accent" onClick={handleExportClick} disabled={!project || Boolean(activeExportJobId)}>{uiText.actions.export}</button>
         </div>
@@ -1357,7 +1367,7 @@ export function App() {
           <div className="nle-header__group" style={{ fontSize: "0.85em", gap: 4 }}>
             <span>I:{inFrame ?? "-"}</span>
             <span>O:{outFrame ?? "-"}</span>
-            <button className="nle-btn nle-btn--small" onClick={() => { setInFrame(null); setOutFrame(null); }} title="Clear I/O range">Clear</button>
+            <button className="nle-btn nle-btn--small" onClick={() => { setInFrame(null); setOutFrame(null); }} title="範囲をクリア">クリア</button>
           </div>
         )}
         <div className="nle-header__spacer" />

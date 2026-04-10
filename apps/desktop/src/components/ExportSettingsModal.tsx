@@ -35,12 +35,12 @@ export function ExportSettingsModal({ open, onClose, onExport, defaultSettings }
   return (
     <div className="nle-modal-overlay" onClick={onClose}>
       <div className="nle-modal" onClick={(e) => e.stopPropagation()} style={{ minWidth: 360 }}>
-        <h3 style={{ margin: "0 0 12px" }}>Export Settings</h3>
+        <h3 style={{ margin: "0 0 12px" }}>書き出し設定</h3>
 
         <div className="nle-form-row">
-          <label className="nle-form-label">Resolution</label>
+          <label className="nle-form-label">解像度</label>
           <select className="nle-select" value={resolution} onChange={(e) => setResolution(e.target.value)}>
-            <option value="source">Source (original)</option>
+            <option value="source">ソース (元の解像度)</option>
             <option value="720p">720p</option>
             <option value="1080p">1080p</option>
             <option value="4k">4K</option>
@@ -48,7 +48,7 @@ export function ExportSettingsModal({ open, onClose, onExport, defaultSettings }
         </div>
 
         <div className="nle-form-row">
-          <label className="nle-form-label">Mosaic Strength</label>
+          <label className="nle-form-label">モザイク強度</label>
           <input
             type="range" min={2} max={64} step={1}
             value={mosaicStrength}
@@ -59,18 +59,18 @@ export function ExportSettingsModal({ open, onClose, onExport, defaultSettings }
         </div>
 
         <div className="nle-form-row">
-          <label className="nle-form-label">Audio</label>
+          <label className="nle-form-label">音声</label>
           <select className="nle-select" value={audioMode} onChange={(e) => setAudioMode(e.target.value)}>
-            <option value="mux_if_possible">Include audio</option>
-            <option value="video_only">Video only</option>
+            <option value="mux_if_possible">音声を含む</option>
+            <option value="video_only">映像のみ</option>
           </select>
         </div>
 
         <div className="nle-form-row">
-          <label className="nle-form-label">Bitrate</label>
+          <label className="nle-form-label">ビットレート</label>
           <select className="nle-select" value={bitrateMode} onChange={(e) => setBitrateMode(e.target.value as "auto" | "manual")}>
-            <option value="auto">Auto</option>
-            <option value="manual">Manual</option>
+            <option value="auto">自動</option>
+            <option value="manual">手動</option>
           </select>
           {bitrateMode === "manual" && (
             <input
@@ -84,8 +84,8 @@ export function ExportSettingsModal({ open, onClose, onExport, defaultSettings }
         </div>
 
         <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 16 }}>
-          <button className="nle-btn" onClick={onClose}>Cancel</button>
-          <button className="nle-btn nle-btn--accent" onClick={handleSubmit}>Export</button>
+          <button className="nle-btn" onClick={onClose}>キャンセル</button>
+          <button className="nle-btn nle-btn--accent" onClick={handleSubmit}>書き出し</button>
         </div>
       </div>
     </div>
