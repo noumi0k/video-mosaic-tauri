@@ -5,144 +5,170 @@
 
 ---
 
-## 1. 書き出しまわり
+## 1. 危険フレーム一覧の左パネル統合
 
-| 機能 | Tauri 版 | 備考 |
-|------|---------|------|
-| 書き出し設定ダイアログ（コーデック/解像度/音声/保存先） | ✅ | `ExportSettingsModal.tsx` (resolution/mosaic/audio/bitrate) |
-| 書き出し前の危険フレーム確認 (KFギャップ/面積急変/predicted) | ✅ | `dangerousFrames.ts` + export 前 confirm |
-| 危険フレーム確認ダイアログ (3択: 確認/無視/キャンセル) | ✅ | `window.confirm` で実装 |
-| 危険フレーム一覧の左パネル統合 (行クリックシーク/確認トグル) | ❌ | confirm ダイアログのみ。左パネル統合・確認トグルなし |
-| タイムライン上の危険マーカー (色分け/クリックシーク) | ❌ | タイムラインマーカー未実装 |
+### PySide6 実装内容
+- `app/ui/danger_warnings_section.py` — スクロール可能な警告一覧ウィジェット
+- 各行: アイコン / フレーム番号 / 理由 / トラックラベル / 確認トグル
+- ヘッダー常時表示 + ▼▶ 折りたたみ（×ボタン廃止済み）
+- 確認トグル: 未確認→「確認」/ 確認済み→「✓ 確認済み」/ 再クリックで解除
+- シグナル: `frame_selected(int)` / `warning_resolved(int, bool)`
+- `track_list_panel.py` 最上部に埋め込み
+- `main_window.py` から行クリック時に `_seek_to_frame()` 接続
 
-## 2. マスク編集・キーフレーム編集
-
-| 機能 | Tauri 版 | 備考 |
-|------|---------|------|
-| 楕円マスクの軸別リサイズ (辺中点ハンドル) | ✅ | `CanvasStagePanel.tsx` edge handles |
-| 辺ダブルクリックで頂点追加 | ❌ | 右クリックメニューからのみ |
-| 右クリック時の頂点追加バグ修正 | ✅ | Tauri 版では発生しない (DOM イベント) |
-| keyframe 複製 (Ctrl+D) | ✅ | `handleDuplicateKeyframe` |
-| keyframe 追加・補間・Undo/Redo の E2E テスト | ❌ | E2E テスト基盤なし |
-
-## 3. AI 検出まわり
-
-| 機能 | Tauri 版 | 備考 |
-|------|---------|------|
-| 全体検出 | ✅ | `detect_video.py` + job polling |
-| 全体検出時の上書き確認ダイアログ (3択) | ❌ | 確認なしで即検出開始 |
-| AI 区間検出 (In/Out マーカー + ショートカット) | ✅ | I/O キー + start_frame/end_frame |
-| 区間外不変の保証 | ✅ | start_frame/end_frame でフレーム範囲限定 |
-| manual 保護付き区間再検出 | ✅ | `user_locked` / `user_edited` 保護 |
-| 区間検出結果のマージ (ラベル+IoU) | ⚠️ | `replace_detector_tracks` で全置換。PySide6 のような IoU ベース対応付けなし |
-| 誤マージ回帰テスト | ❌ | E2E テスト基盤なし |
-| 単フレーム検出 (Ctrl+Shift+D) | ✅ | `handleDetectCurrentFrame` |
-| NudeNet v3.4 クラスインデックス (18クラス対応) | ✅ | 修正済み (male_genitalia=14, male_face=12) |
-
-## 4. マスクトラックの保持・終了まわり
-
-| 機能 | Tauri 版 | 備考 |
-|------|---------|------|
-| Persistent Mask Track (active/lost/inactive) | ✅ | `track_quality.py` stitching + filtering |
-| 検出区間外での shape 保持・編集 | ✅ | `resolve_for_editing` (held semantics) |
-| auto fallback / continuity 評価 (3段) | ✅ | `mask_continuity.py` ACCEPT/ACCEPT_ANCHORED/REJECT |
-| manual anchor 前方継承 | ✅ | `get_active_manual_anchor` (60 frame decay) |
-| manual keyframe 保護 | ✅ | `apply_domain_rules` + `user_edited` |
-| マスク残留バグ修正 (消失後もモザイクが残る) | ✅ | `resolve_for_render` segment gate |
-| 範囲外延長ヒント (K で延長) | ❌ | ヒント表示なし |
-| K ヒントのノイズ削減 | ❌ | 未実装 |
-
-## 5. Progress UX
-
-| 機能 | Tauri 版 | 備考 |
-|------|---------|------|
-| 共通 Progress UX (BusyWorker/BusyProgressScope) | ✅ | `JobPanel.tsx` で runtime/detect/export 共通表示 |
-| 単フレーム検出の非同期化 | ✅ | job 方式で非同期実行 |
-| 長時間処理の共通パターン化 | ✅ | job polling + terminal state 処理 |
-
-## 6. UI リデザイン・操作導線
-
-| 機能 | Tauri 版 | 備考 |
-|------|---------|------|
-| 日本語 UI 正本化 | ⚠️ | `uiText.ts` で部分的。ボタン類は英語混在 |
-| パネルヘッダー階層化 | ✅ | CSS `nle-panel-header` |
-| Preview 主役化 | ✅ | HTML video 中央配置 |
-| ツールバー整理 | ✅ | ヘッダーにグルーピング |
-| Inspector 並び替え (高頻度を上位) | ✅ | TrackDetail + KeyframeDetail 分離 |
-| タイムライン左側からのトラック選択 | ✅ | `TimelineView` track name click |
-| transport (play/pause/step) 再配置 | ⚠️ | HTML5 video controls 依存。独立 transport UI なし |
-| QPainter アイコン化 | — | Tauri は DOM/CSS ベースなので不要 |
-| DangerWarningsSection の左パネル統合 | ❌ | 左パネルに危険フレーム一覧なし |
-| track 複製 | ✅ | `handleDuplicateTrack` |
-| track 分割 | ✅ | `handleSplitTrack` |
-
-## 7. Crash Recovery
-
-| 機能 | Tauri 版 | 備考 |
-|------|---------|------|
-| 自動保存 (60秒/dirty時) | ✅ | `autosaveTimerRef` |
-| 起動時 recovery 検出 + ダイアログ | ❌ | autosave はあるが recovery dialog なし |
-| RecoveryStore (atomic write) | ⚠️ | `save_project.py` は通常保存。recovery 専用ストアなし |
-| 復元後 dirty 化 | ❌ | recovery フローなし |
-| 保存成功時 recovery cleanup | ❌ | recovery ファイルの管理なし |
-| closeEvent dirty ガード (保存/破棄/キャンセル) | ✅ | `confirmDiscardIfDirty` (New/Open/Open Video) |
-| project_id ベースの recovery 識別 | ❌ | recovery フローなし |
-
-## 8. E2E / UI テスト基盤
-
-| 機能 | Tauri 版 | 備考 |
-|------|---------|------|
-| pytest-qt / qtbot 基盤 | — | Tauri は Web ベース。pytest-qt は不要 |
-| smoke テスト | ❌ | Tauri frontend E2E テストなし |
-| キーフレームフロー E2E | ❌ | |
-| 危険フレームフロー E2E | ❌ | |
-| 区間検出フロー E2E | ❌ | |
-| backend ユニットテスト | ✅ | 10ファイル ~400件 |
-| frontend ユニットテスト | ✅ | 10ファイル ~140件 |
-
-## 9. 運用・ドキュメント
-
-| 機能 | Tauri 版 | 備考 |
-|------|---------|------|
-| 実装状況チェックリスト | ✅ | 本文書 |
-| 移行ドキュメント (contract freeze) | ✅ | `docs/tauri-migration/` 5文書 |
-| テスト件数管理 | ✅ | backend 255+ / frontend 140+ |
+### Tauri 実装状況: ❌ 未実装
+- `dangerousFrames.ts` で危険フレーム検出は実装済み
+- export 前の `window.confirm` ダイアログのみ
+- **不足**: 左パネル統合、確認トグル、行クリックシーク、折りたたみ
 
 ---
 
-## 10. サマリー
+## 2. タイムライン危険マーカー
 
-### 実装済み (PySide6 と同等)
+### PySide6 実装内容
+- `timeline_widget.py` ルーラー上端に ▲ マーカー描画
+- 色分け: long_gap=オレンジ / area_jump=スカイブルー / track_lost=赤ピンク
+- サイズ: ±6px
+- 確認済み → 半透明グレー化
+- ルーラークリック時 8px 以内の危険マーカーへスナップ
+- `set_danger_markers(markers)` API
+- `main_window.py` から左パネルと同時にマーカー反映
 
-- 書き出し設定ダイアログ (解像度/ビットレート/音声/モザイク強度)
-- 危険フレーム検出 + export 前警告
-- 楕円軸別リサイズ
-- keyframe 複製 (Ctrl+D) / 単フレーム検出 (Ctrl+Shift+D)
-- AI 全体検出 / 区間検出 (I/O マーカー)
-- manual 保護 / user_locked / continuity fallback
-- Persistent Mask Track / 検出外 shape 保持
-- 共通 Progress UX (JobPanel)
-- track 複製 / 分割 / 作成 / 削除
-- Undo/Redo + 件数表示
-- 自動保存 (60秒) / 未保存ガード
-- キーボードショートカット (16種)
-- NudeNet v3.4 全18クラス対応
+### Tauri 実装状況: ❌ 未実装
+- TimelineView に in/out マーカーはあるが、危険フレームマーカーなし
+
+---
+
+## 3. 全体検出前の上書き確認ダイアログ
+
+### PySide6 実装内容
+- `main_window.py` の `detect_masks()` で既存トラック有無を確認
+- 3択ダイアログ:
+  1. 手動編集を保護して検出 (manual/user_locked を壊さない)
+  2. すべて上書きして検出
+  3. キャンセル
+- 既存トラック件数・手動編集済み件数を文言に含む
+- 翻訳文言は `app/ui/i18n.py` に追加
+
+### Tauri 実装状況: ❌ 未実装
+- 確認なしで即検出開始 (`replace_detector_tracks` で全置換)
+
+---
+
+## 4. 区間検出 IoU マージロジック
+
+### PySide6 実装内容
+- `apply_range_detection_results()` で既存トラックと新検出を ラベル+IoU で対応付け
+- IoU 閾値: 0.1
+- マッチ時: 区間外 KF 全保持、manual 保護 KF 保持、区間内のみ更新
+- 未マッチ: 新規トラック追加
+- 区間内 KF なし: 完全無変更
+- `preserve_manual` フラグで manual 保護 ON/OFF
+- 既知制限: 完全交差時の誤マッチ、中間位置の IoU 不足 → `[KNOWN_LIMIT]` テスト
+
+### Tauri 実装状況: ⚠️ 部分実装
+- `start_frame`/`end_frame` でフレーム範囲限定は実装済み
+- **不足**: `replace_detector_tracks` は全置換。IoU ベース対応付けなし
+
+---
+
+## 5. 辺ダブルクリック頂点追加
+
+### PySide6 実装内容
+- `preview_canvas.py` の `mouseDoubleClickEvent()` 新設
+- `_resolve_edge_target()` で辺近傍判定
+- 辺近傍ダブルクリック → 頂点追加
+- マスク中央の広い領域 → 追加しない
+- 右クリック → コンテキストメニューのみ (即時 emit 削除済み)
+
+### Tauri 実装状況: ❌ 未実装
+- CanvasStagePanel で右クリックメニューからの頂点追加は可能
+- ダブルクリック頂点追加なし
+
+---
+
+## 6. Recovery ダイアログ
+
+### PySide6 実装内容
+- `app/ui/recovery_dialog.py` — 復元/削除/後で決める/閉じる
+- `app/infra/storage/recovery_store.py` — recovery ファイル読み書き・一覧・削除・atomic 保存
+- `project_id` (UUID) ベースで recovery 識別
+- 起動後 300ms で `data/temp/*.recovery.json` 検索 → ダイアログ表示
+- 復元時: project セット → dirty 状態 → `can_undo=False` の clean history → recovery 削除
+- `closeEvent()` の保存/破棄/キャンセル分岐
+- 保存成功時 recovery cleanup
+
+### Tauri 実装状況: ⚠️ 部分実装
+- 自動保存 60秒 (`autosaveTimerRef`) は実装済み
+- 未保存ガード (`confirmDiscardIfDirty`) は実装済み
+- **不足**: recovery ファイル管理、起動時 recovery ダイアログ、project_id ベース識別
+
+---
+
+## 7. 独立 transport UI
+
+### PySide6 実装内容
+- `timeline_widget.py` 内の transport bar として整理
+- Preview 直下 / Timeline 上側 / 中央基準の配置
+- QPainter 描画アイコン: skip_back/step_back/play/pause/step_fwd/skip_fwd
+- 4 状態対応: Normal/Active/Pressed/Disabled
+- 左右対称思想: 戻し系=左、送り系=右、再生/停止=中央
+- ダークテーマ対応、DPI 100%/125%/150% 確認済み
+
+### Tauri 実装状況: ⚠️ 部分実装
+- HTML5 `<video controls>` による再生/一時停止は動作
+- Space キーで play/pause
+- Arrow キーでフレーム送り/戻し
+- **不足**: 独立 transport ボタン群、QPainter 相当のアイコン描画
+
+---
+
+## 8. 日本語 UI 統一
+
+### PySide6 実装内容
+- `app/ui/i18n.py` 中心に `tr()` 経由の日本語文言化
+- 対象: メニューバー/ツールバー/PropertyPanel/TrackListPanel/KF一覧/警告/ヒント/検出/transport tooltip
+- Phase 1: 55翻訳キー追加、パネルヘッダーアクセント
+- Phase 2: レイアウト配分見直し、Inspector 再編
+- UTF-8 前提、`?` `�` 混入チェック
+
+### Tauri 実装状況: ⚠️ 部分実装
+- `uiText.ts` で主要文言は日本語化済み
+- **不足**: ボタン類の英語残り (Undo/Redo/Export/+ Track 等)、tooltip 未翻訳
+
+---
+
+## 9. サマリー: 実装済み vs 未実装
+
+### 実装済み (PySide6 と同等以上)
+
+| カテゴリ | 機能 |
+|---------|------|
+| 書き出し | 設定ダイアログ (解像度/ビットレート/音声/モザイク) |
+| 書き出し | 危険フレーム検出 + export 前 confirm |
+| 編集 | 楕円軸別リサイズ、KF 複製 (Ctrl+D) |
+| 検出 | 全体検出 / 区間検出 (I/O) / 単フレーム検出 |
+| 検出 | manual 保護 / user_locked / continuity fallback |
+| 検出 | NudeNet v3.4 全18クラス対応 |
+| トラック | Persistent Track / 検出外 shape 保持 |
+| トラック | 作成 / 削除 / 複製 / 分割 / 表示切替 |
+| 操作 | Undo/Redo + 件数表示 |
+| 操作 | キーボードショートカット 16種 |
+| 安全 | 自動保存 60秒 / 未保存ガード |
+| Progress | JobPanel 共通表示 |
 
 ### 未実装 (PySide6 にあって Tauri にないもの)
 
-**中規模:**
-- 危険フレーム一覧の左パネル統合 (確認トグル/行クリックシーク)
-- タイムライン上の危険マーカー (色分け表示)
-- 全体検出前の上書き確認ダイアログ (3択)
-- 区間検出のマージロジック (IoU ベース対応付け)
-- 辺ダブルクリック頂点追加
-- 起動時 recovery ダイアログ
-- 独立 transport UI (play/pause/step ボタン)
-- 日本語 UI の統一 (ボタン類の英語残り)
-
-**大規模:**
-- E2E テスト基盤 (Playwright / Vitest 等)
-- RecoveryStore + project_id ベース recovery
+| # | 機能 | 規模 |
+|---|------|------|
+| 1 | 危険フレーム左パネル統合 (確認トグル/行クリックシーク/折りたたみ) | 中 |
+| 2 | タイムライン危険マーカー (色分け/スナップ/確認済みグレー化) | 中 |
+| 3 | 全体検出前の上書き確認ダイアログ (3択) | 小 |
+| 4 | 区間検出 IoU マージロジック (ラベル+IoU 対応付け) | 大 |
+| 5 | 辺ダブルクリック頂点追加 | 小 |
+| 6 | Recovery ダイアログ (起動時復元/project_id 識別) | 中 |
+| 7 | 独立 transport UI (中央帯ボタン群) | 中 |
+| 8 | 日本語 UI 統一 (ボタン/tooltip の英語残り解消) | 小 |
 
 ---
 
