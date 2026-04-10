@@ -43,6 +43,7 @@ import {
   redoHistory,
   type EditorHistoryState,
 } from "./editorHistory";
+import { detectDangerousFrames } from "./dangerousFrames";
 import { assertRawFilePathForBackend } from "./pathUtils";
 import { uiText } from "./uiText";
 import type {
@@ -654,6 +655,15 @@ export function App() {
 
   async function handleExport() {
     if (!project) return;
+    // Pre-export safety check: warn about dangerous frames.
+    const dangers = detectDangerousFrames(project);
+    if (dangers.length > 0) {
+      const summary = dangers.slice(0, 5).map((d) => `F${d.frameIndex}: ${d.reason} (${d.trackLabel})`).join("\n");
+      const extra = dangers.length > 5 ? `\n... and ${dangers.length - 5} more` : "";
+      if (!window.confirm(`${dangers.length} dangerous frame(s) detected:\n\n${summary}${extra}\n\nExport anyway?`)) {
+        return;
+      }
+    }
     const projectPath = project.project_path ?? (await (async () => {
       setActivity(uiText.activity.savingBeforeExport);
       return handleSaveProject(false);
