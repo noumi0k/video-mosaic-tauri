@@ -1,5 +1,7 @@
 # AI_HANDOFF.md
 
+> 位置づけ: このファイルは直近作業の handoff log です。現行実装の正本は `docs/engineering/current-implementation.md`、実装済み / 未実装 backlog の正本は `docs/project/unimplemented-features.md` です。末尾の Next Logical Step は作成時点の履歴として扱い、現在の作業判断では正本を優先してください。
+
 ## Snapshot
 - Frontend recovered shell is now back to a usable editor shape.
 - `App.tsx` is a clean UTF-8 shell again and no longer carries the old mojibake damage.
@@ -275,8 +277,8 @@ destination was silently corrupted:
 - Do not hand-edit `review-runtime/python/` to swap interpreters without re-running the ABI check.
 
 ## Next Logical Step
-1. **Run `npm.cmd run review:runtime`** to sync the April 9 backend changes to `review-runtime`.
-2. Drive the full interactive UI flow in the Tauri window (open video → detect → edit on canvas → save/load → export) to confirm the wiring end-to-end.
-3. Implement Persistent Mask Track (P0): extend track lifetime beyond detection span, allow editing outside detection frames, add hold/predict/interpolate shape resolution.
-4. Continue moving editor-specific orchestration out of `App.tsx` into small hooks or controller modules before adding more editing features.
-5. (Backlog) Add `expected_size` + `expected_sha256` for `640m.onnx`, SAM2, erax once those files are available to hash locally.
+1. Drive the full interactive UI flow in the Tauri window (open video → detect → edit on canvas → save/load → export) to confirm the wiring end-to-end.
+2. Continue moving editor-specific orchestration out of `App.tsx` into small hooks or controller modules before adding more editing features.
+3. Implement remaining P2 items from `docs/project/unimplemented-features.md`: onion skin, GPU encoder selection, export queue, and E2E tests.
+4. (Backlog) Add `expected_size` + `expected_sha256` for `640m.onnx`, SAM2, erax once those files are available to hash locally.
+5. Re-run `npm.cmd run review:runtime` whenever backend Python changes need to be included in a review build.

@@ -1,6 +1,9 @@
 # 未実装機能一覧
 
-最終更新: 2026-04-10
+最終更新: 2026-04-11
+
+このファイルは、実装済み / 未実装 backlog の正本です。
+現行実装の責務境界と不変条件は [../engineering/current-implementation.md](../engineering/current-implementation.md) を参照してください。
 
 ## 1. 実装済み (今回の移行作業で完了)
 
@@ -97,4 +100,4 @@
 | P0 | **全完了** | Persistent mask track, 検出外編集, continuity/fallback, manual anchor 継承 |
 | P1 | **全完了** | Timeline zoom, export parity, progress UX, keyboard shortcuts, autosave, range detect |
 | P2 | 残4件 | オニオンスキン, GPU エンコーダ, export キュー, E2E テスト |
-| P3 | 残3件 | 教師データ, 再学習, installer, crash recovery |
+| P3 | 残4件 | 教師データ, 再学習, installer, crash recovery |

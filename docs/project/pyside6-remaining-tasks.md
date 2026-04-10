@@ -1,6 +1,8 @@
 # Auto Mosaic — PySide6 機能の Tauri 版実装状況
 
-最終更新: 2026-04-10  
+> 位置づけ: このファイルは PySide6 版との比較履歴です。現行実装の正本ではありません。現在の作業判断は `docs/engineering/current-implementation.md` と `docs/project/unimplemented-features.md` を優先してください。
+
+最終更新: 2026-04-11
 対象: `H:\mosicprogect\taurimozaic` main ブランチ
 
 ---
@@ -66,9 +68,10 @@
 - `preserve_manual` フラグで manual 保護 ON/OFF
 - 既知制限: 完全交差時の誤マッチ、中間位置の IoU 不足 → `[KNOWN_LIMIT]` テスト
 
-### Tauri 実装状況: ⚠️ 部分実装
+### Tauri 実装状況: ✅ 実装済み
 - `start_frame`/`end_frame` でフレーム範囲限定は実装済み
-- **不足**: `replace_detector_tracks` は全置換。IoU ベース対応付けなし
+- `ProjectDocument.merge_range_detection_tracks()` で区間検出時の IoU マージを実装済み
+- 全体検出では `replace_detector_tracks()`、区間検出では IoU マージを使い分ける
 
 ---
 
@@ -164,11 +167,10 @@
 | 1 | 危険フレーム左パネル統合 (確認トグル/行クリックシーク/折りたたみ) | 中 |
 | 2 | タイムライン危険マーカー (色分け/スナップ/確認済みグレー化) | 中 |
 | 3 | 全体検出前の上書き確認ダイアログ (3択) | 小 |
-| 4 | 区間検出 IoU マージロジック (ラベル+IoU 対応付け) | 大 |
-| 5 | 辺ダブルクリック頂点追加 | 小 |
-| 6 | Recovery ダイアログ (起動時復元/project_id 識別) | 中 |
-| 7 | 独立 transport UI (中央帯ボタン群) | 中 |
-| 8 | 日本語 UI 統一 (ボタン/tooltip の英語残り解消) | 小 |
+| 4 | 辺ダブルクリック頂点追加 | 小 |
+| 5 | Recovery ダイアログ (起動時復元/project_id 識別) | 中 |
+| 6 | 独立 transport UI (中央帯ボタン群) | 中 |
+| 7 | 日本語 UI 統一 (ボタン/tooltip の英語残り解消) | 小 |
 
 ---
 

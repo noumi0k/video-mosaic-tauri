@@ -2,7 +2,9 @@
 
 作成日: 2026-04-02  
 対象: 既存資料を参照しつつ、既存 PySide6 実装コードは再利用せず、Tauri フロントエンド + Python バックエンド構成で完全新規構築するための詳細要件仕様書  
-文書区分: 実装用正本  
+文書区分: 設計履歴・参照資料
+
+> 現在の作業正本ではありません。現行実装の責務境界と不変条件は `docs/engineering/current-implementation.md`、実装済み / 未実装 backlog は `docs/project/unimplemented-features.md` を優先してください。
 
 ---
 
@@ -1482,4 +1484,3 @@ Windows 向け正式配布物は以下の 2 コンポーネント構成とする
 - `tauri_migration_backend_plan.md`
 - `future_retraining_design_memo.md`
 - `prompt_detector_abstraction.md`
-

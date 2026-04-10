@@ -1,5 +1,7 @@
 # Auto Mosaic Tauri 完全新規実装 指示書（AIエージェント向け）
 
+> 位置づけ: このファイルは from-scratch 方針の設計履歴です。現在の作業正本ではありません。現行実装の責務境界と不変条件は `docs/engineering/current-implementation.md` を優先してください。
+
 ## 0. この文書の目的
 
 この文書は、**AIエージェントが Auto Mosaic を Tauri + Python 構成で完全新規実装するための実装指示書**である。  

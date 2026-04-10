@@ -1,0 +1,211 @@
+# Auto Mosaic 現行実装 正本
+
+最終更新: 2026-04-11
+
+この文書は、現行リポジトリで作業するエンジニア / AI エージェント向けの正本です。
+人間向けの説明は [../human/product-spec.md](../human/product-spec.md) に置き、ここでは実装判断に必要な境界、不変条件、実装済み状態を扱います。
+
+## 1. システム構成
+
+- Frontend: `apps/desktop`
+- Desktop shell: Tauri 2
+- UI: React + TypeScript
+- Backend: `apps/backend`
+- Backend runtime: Python 3.12 前提
+- AI inference: ONNX Runtime。GPU は optional、CPU fallback は必須
+- Video processing: FFmpeg + OpenCV fallback
+- Tauri から Python への通信: `subprocess + CLI + JSON I/O`
+
+## 2. 境界ルール
+
+- `stdout` は machine-readable JSON 専用。
+- log、diagnostics、traceback、native library の出力は `stderr` へ逃がす。
+- Frontend は backend の内部 Python module を直接扱わない。
+- Backend は Tauri / React の表示都合を project state に持ち込まない。
+- Backend project state が source of truth。
+- UI は backend state の projection として扱う。
+
+## 3. パスと表示 URL
+
+- Persisted project data には raw local Windows path を入れる。
+- `asset.localhost` や display URL は frontend 表示専用。
+- Backend に display URL を渡してはならない。
+- `video.source_path` は raw local path として検証される。
+- `file://`, `http://`, `https://`, `asset://` 系を project の raw path として保存しない。
+
+## 4. Project model
+
+現行 schema は `CURRENT_PROJECT_SCHEMA_VERSION = 2`。
+
+Project は主に次を持つ。
+
+- `project_id`
+- `version`
+- `schema_version`
+- `name`
+- `project_path`
+- `video`
+- `tracks`
+- `detector_config`
+- `export_preset`
+- `paths`
+
+PySide6 project v1 は migration adapter で Tauri schema v2 へ変換される。
+この migration は、keyframe source、track source、manual edit protection、segment 化、export preset 正規化を含む。
+
+## 5. Mask track の不変条件
+
+編集の中心は isolated keyframe ではなく `MaskTrack`。
+
+`MaskTrack` は次を持つ。
+
+- `track_id`
+- `label`
+- `state`
+- `source`
+- `visible`
+- `keyframes`
+- `label_group`
+- `user_locked`
+- `user_edited`
+- `confidence`
+- `style`
+- `segments`
+
+`user_edited` が true、または manual keyframe を含む track は manual 意図を持つ。
+`source == "detector"` の track でも、manual 意図が入った時点で `source` は manual 側へ寄る。
+
+自動検出で置換してよいのは、`source == "detector"` かつ `user_edited == false` かつ `user_locked == false` の track だけ。
+
+## 6. Segment と shape 解決
+
+Export では renderable segment を使う。
+単純な last-keyframe hold に戻してはならない。
+
+Renderable segment state:
+
+- `confirmed`
+- `held`
+- `predicted`
+- `interpolated`
+- `uncertain`
+- `active`
+- `detected`
+
+`resolve_active_keyframe(frame_index)` は export 用で、renderable span の外では `None` を返す。
+`resolve_shape_for_editing(frame_index)` は編集用で、最初の keyframe 以後なら検出範囲外でも直近 shape を返せる。
+
+## 7. 検出
+
+Backend command は `detect-video`, `start-detect-job`, `run-detect-job`, `get-detect-status`, `get-detect-result`, `cancel-detect-job`, `list-detect-jobs`, `cleanup-detect-jobs` を持つ。
+
+検出結果の反映ルール:
+
+- 全体検出では replaceable detector track を置換する。
+- `start_frame` / `end_frame` 付きの範囲検出では IoU merge を使い、範囲外 keyframe と manual keyframe を保護する。
+- broken / missing model は worker 起動前の preflight で失敗させる。
+- worker が native crash した場合も job state と result/status の整合性を壊さない方向で扱う。
+
+## 8. Model / doctor / runtime
+
+Model 管理は file existence だけで判断しない。
+`doctor` と `fetch_models` は integrity-based に扱う。
+
+現行方針:
+
+- model status は `missing`, `broken`, `installed` を区別する。
+- HTML redirect / Git LFS pointer / tiny file / invalid ONNX magic / expected size / SHA-256 を検査する。
+- temp download を verify してから final path へ promote する。
+- `browser_download_url` ではなく、必要に応じて GitHub API asset URL と header を使う。
+- detect 前に required model の integrity を確認する。
+- review-runtime は vendor ABI と Python minor version を一致させる。
+
+Backend Python 変更後に review build を作る場合は `npm.cmd run review:runtime` を実行する。
+
+## 9. Export
+
+Export は Python backend の責務。
+Frontend は設定と job/cancel/status 表示を扱う。
+
+現行で扱う設定:
+
+- `resolution`: `source`, `720p`, `1080p`, `4k`
+- `mosaic_strength`
+- `audio_mode`: `mux_if_possible`, `video_only`
+- `bitrate_kbps`: `null` なら auto
+
+FFmpeg pipe export を優先し、失敗または unavailable の場合は OpenCV fallback を使う。
+音声は `mux_if_possible` のとき ffmpeg で source audio を mux する。
+GPU encoder selection はまだ正本 backlog の未実装項目。
+
+## 10. Frontend 状態
+
+`apps/desktop/src/App.tsx` は現在も大きめの shell で、主に次を持つ。
+
+- project open / save / new
+- preview source setup
+- selection coordination
+- shared job launch / polling
+- high-level activity / error status
+- detect / export orchestration
+- autosave timer
+- keyboard shortcuts
+
+主要 editor surface:
+
+- `components/TimelineView.tsx`
+- `components/CanvasStagePanel.tsx`
+- `components/TrackDetailPanel.tsx`
+- `components/KeyframeDetailPanel.tsx`
+- `components/JobPanel.tsx`
+- `components/DangerWarningsPanel.tsx`
+
+今後の UI 整理では、backend domain rule を frontend convenience のために変えない。
+必要なら `App.tsx` から hooks / controller へ分離するが、振る舞い変更と混ぜない。
+
+## 11. Job model
+
+長時間処理は job-based。
+Runtime jobs、detect jobs、export は Job Panel に集約する。
+
+代表 state:
+
+- `queued`
+- `starting`
+- `running`
+- `cancelling`
+- `cancelled`
+- `completed` / `succeeded`
+- `failed`
+- `interrupted`
+
+Cancel は request-based。
+既に terminal state の job を `cancelling` に戻してはならない。
+
+## 12. 実装済み / 未実装
+
+実装済み / 未実装の正本は [../project/unimplemented-features.md](../project/unimplemented-features.md)。
+
+大枠では、P0/P1 は完了扱い。
+現在残っている大きな項目は次。
+
+- オニオンスキン
+- GPU encoder selection
+- Export queue
+- E2E tests
+- 教師データ保存
+- ローカル再学習
+- 正式 installer / updater
+- crash recovery
+
+## 13. 古い資料の扱い
+
+次の文書は有用だが正本ではない。
+
+- [../project/ai-handoff.md](../project/ai-handoff.md): dated handoff log
+- [../project/pyside6-remaining-tasks.md](../project/pyside6-remaining-tasks.md): PySide6 比較の履歴
+- [../architecture/requirements-spec-v2.1.md](../architecture/requirements-spec-v2.1.md): 詳細要件の履歴
+- [../architecture/tauri-from-scratch-spec.md](../architecture/tauri-from-scratch-spec.md): from-scratch 方針の履歴
+- [../tauri-migration/](../tauri-migration/): 移行調査アーカイブ
+
+実装時の判断は、この文書、`unimplemented-features.md`、実装コード、テストの順で照合する。

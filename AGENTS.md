@@ -5,8 +5,9 @@ Auto Mosaic is a fully local, offline desktop app built with a Tauri frontend an
 
 ## Read First
 Before starting any task, read these files first:
-1. `AI_HANDOFF.md`
-2. `unimplemented-features.md`
+1. `docs/engineering/current-implementation.md`
+2. `docs/project/unimplemented-features.md`
+3. `docs/project/ai-handoff.md`
 
 Then use this file as the stable operating rule set.
 

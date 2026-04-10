@@ -5,9 +5,10 @@ Auto Mosaic is a fully local/offline Tauri desktop app with a Python backend. Th
 
 ## Start Here
 Read these first:
-1. `AI_HANDOFF.md`
-2. `unimplemented-features.md`
-3. This file for stable Claude-specific operating rules
+1. `docs/engineering/current-implementation.md`
+2. `docs/project/unimplemented-features.md`
+3. `docs/project/ai-handoff.md`
+4. This file for stable Claude-specific operating rules
 
 ## Non-Negotiables
 - Use `subprocess + CLI + JSON I/O` for Tauri ↔ Python integration.
@@ -20,10 +21,10 @@ Read these first:
 - Keep raw Windows paths in the backend; `asset.localhost` is display-only.
 
 ## Current Focus
-- Persistent mask track behavior
-- `segment/state` as the shared model between backend and UI
-- Safer detect/export behavior around manual edits
-- Better handling of long-running work and progress
+- Keep the implemented persistent mask track and segment/state behavior from regressing.
+- Keep detect/export behavior safe around manual edits.
+- Keep long-running work job-based with progress, cancel, and status.
+- Use `docs/engineering/current-implementation.md` as the current source of truth; treat older architecture docs as references.
 
 ## Working Style
 - Prefer domain-first fixes over UI-first hacks.
@@ -34,7 +35,7 @@ Read these first:
 ## Scope Control
 - Do not expand into feature work beyond the requested fix.
 - Do not rewrite adjacent systems unless they block the task.
-- Do not add speculative backlog details here; use `unimplemented-features.md` for that.
+- Do not add speculative backlog details here; use `docs/project/unimplemented-features.md` for that.
 - Do not move invariant enforcement into the frontend.
 
 ## Test Expectations
