@@ -324,7 +324,13 @@ export function App() {
     setActivity(uiText.activity.videoReady);
   }
 
+  function confirmDiscardIfDirty(): boolean {
+    if (!projectDirty) return true;
+    return window.confirm("未保存の変更があります。破棄してよろしいですか？");
+  }
+
   async function handleNewProject() {
+    if (!confirmDiscardIfDirty()) return;
     const response = await backend<MutationResult>("create-project", {
       name: uiText.project.untitledName,
       video: currentVideo,
@@ -341,6 +347,7 @@ export function App() {
   }
 
   async function handleOpenProject() {
+    if (!confirmDiscardIfDirty()) return;
     const selected = await open({ filters: [{ name: "Project", extensions: ["json"] }], multiple: false });
     if (typeof selected !== "string") return;
     assertRawFilePathForBackend(selected, "load-project");
@@ -588,6 +595,7 @@ export function App() {
   }
 
   async function handleOpenVideo() {
+    if (!confirmDiscardIfDirty()) return;
     const selected = await open({
       filters: [{ name: "Video", extensions: ["mp4", "mov", "mkv", "avi", "webm"] }],
       multiple: false,
@@ -720,20 +728,126 @@ export function App() {
     void runDoctor();
   }, []);
 
-  // Keyboard shortcuts: Ctrl+Z (undo), Ctrl+Shift+Z / Ctrl+Y (redo)
+  // Keyboard shortcuts (aligned with PySide6 MainWindow.keyPressEvent)
   useEffect(() => {
     function onKeyDown(e: KeyboardEvent) {
-      if ((e.ctrlKey || e.metaKey) && e.key === "z" && !e.shiftKey) {
+      const ctrl = e.ctrlKey || e.metaKey;
+      const shift = e.shiftKey;
+      const tag = (e.target as HTMLElement)?.tagName;
+      // Don't intercept when typing in inputs/selects.
+      if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
+
+      // Ctrl+Z: Undo
+      if (ctrl && e.key === "z" && !shift) { e.preventDefault(); handleUndo(); return; }
+      // Ctrl+Shift+Z / Ctrl+Y: Redo
+      if (ctrl && (e.key === "Z" || e.key === "y")) { e.preventDefault(); handleRedo(); return; }
+      // Ctrl+S: Save
+      if (ctrl && e.key === "s" && !shift) { e.preventDefault(); void handleSaveProject(false); return; }
+      // Ctrl+Shift+S: Save As
+      if (ctrl && e.key === "S") { e.preventDefault(); void handleSaveProject(true); return; }
+
+      // The following shortcuts require an active project.
+      if (!project) return;
+
+      // Arrow Left/Right: ±1 frame (Shift: ±10)
+      if (e.key === "ArrowLeft") {
         e.preventDefault();
-        handleUndo();
-      } else if ((e.ctrlKey || e.metaKey) && (e.key === "Z" || e.key === "y")) {
+        const step = shift ? 10 : 1;
+        const next = Math.max(0, currentFrame - step);
+        setCurrentFrame(next);
+        handleSeekFrame(next);
+        return;
+      }
+      if (e.key === "ArrowRight") {
         e.preventDefault();
-        handleRedo();
+        const step = shift ? 10 : 1;
+        const max = (currentVideo?.frame_count ?? 1) - 1;
+        const next = Math.min(max, currentFrame + step);
+        setCurrentFrame(next);
+        handleSeekFrame(next);
+        return;
+      }
+      // Space: play/pause video
+      if (e.key === " ") {
+        e.preventDefault();
+        if (videoRef.current) {
+          if (videoRef.current.paused) videoRef.current.play();
+          else videoRef.current.pause();
+        }
+        return;
+      }
+      // K: Add keyframe at current frame
+      if (e.key === "k" && !ctrl && !shift) {
+        e.preventDefault();
+        if (selectedTrackId && commitPlan.kind === "create-held") {
+          void handleCreateKeyframe({
+            frame_index: currentFrame,
+            source: "manual",
+            shape_type: commitPlan.base.shape_type,
+            bbox: commitPlan.base.bbox,
+            points: commitPlan.base.points,
+          });
+        }
+        return;
+      }
+      // Shift+K: Delete keyframe
+      if (e.key === "K" && !ctrl) {
+        e.preventDefault();
+        void handleDeleteKeyframe();
+        return;
+      }
+      // [: Previous keyframe
+      if (e.key === "[") {
+        e.preventDefault();
+        void handleMoveSelectedKeyframe(-1);
+        return;
+      }
+      // ]: Next keyframe
+      if (e.key === "]") {
+        e.preventDefault();
+        void handleMoveSelectedKeyframe(1);
+        return;
+      }
+      // H: Toggle track visibility
+      if (e.key === "h" && !ctrl) {
+        e.preventDefault();
+        void handleToggleTrackVisible();
+        return;
+      }
+      // N: New ellipse track / Shift+N: New polygon track
+      if (e.key === "n" && !ctrl && !shift) {
+        e.preventDefault();
+        void handleCreateTrack();
+        return;
+      }
+      // Delete: Delete selected track
+      if (e.key === "Delete" && selectedTrackId) {
+        e.preventDefault();
+        void handleDeleteTrack();
+        return;
       }
     }
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
   });
+
+  // Autosave: save to disk every 60 seconds when dirty and project has a path.
+  const autosaveTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  useEffect(() => {
+    if (autosaveTimerRef.current) {
+      clearInterval(autosaveTimerRef.current);
+      autosaveTimerRef.current = null;
+    }
+    if (!project?.project_path || !projectDirty) return;
+    autosaveTimerRef.current = setInterval(() => {
+      if (project?.project_path && projectDirty) {
+        void handleSaveProject(false);
+      }
+    }, 60_000);
+    return () => {
+      if (autosaveTimerRef.current) clearInterval(autosaveTimerRef.current);
+    };
+  }, [project?.project_path, projectDirty]);
 
   useEffect(() => {
     const activeJobIds = Object.values(runtimeJobs).filter((job) => isActiveRuntimeState(job.state)).map((job) => job.job_id);
