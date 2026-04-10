@@ -1888,6 +1888,65 @@ class TestInterpolatePolygonPurity:
 # Resolve polygon interpolation (W7/W8 with polygon)
 # ---------------------------------------------------------------------------
 
+# ---------------------------------------------------------------------------
+# expand_px / feather interpolation
+# ---------------------------------------------------------------------------
+
+class TestInterpolateExpandPxFeather:
+    def test_ellipse_both_expand_px_interpolated(self):
+        a = _ellipse_kf(0)
+        a.expand_px = 10
+        b = _ellipse_kf(10)
+        b.expand_px = 20
+        result = interpolate_ellipse(a, b, 5)
+        assert result.expand_px == 15
+
+    def test_ellipse_one_expand_px_inherits(self):
+        a = _ellipse_kf(0)
+        a.expand_px = 10
+        b = _ellipse_kf(10)
+        b.expand_px = None
+        result = interpolate_ellipse(a, b, 5)
+        assert result.expand_px == 10
+
+    def test_ellipse_both_none_stays_none(self):
+        a = _ellipse_kf(0)
+        b = _ellipse_kf(10)
+        result = interpolate_ellipse(a, b, 5)
+        assert result.expand_px is None
+        assert result.feather is None
+
+    def test_ellipse_feather_interpolated(self):
+        a = _ellipse_kf(0)
+        a.feather = 0
+        b = _ellipse_kf(10)
+        b.feather = 10
+        result = interpolate_ellipse(a, b, 5)
+        assert result.feather == 5
+
+    def test_polygon_expand_px_interpolated(self):
+        a = _polygon_kf(0)
+        a.expand_px = 4
+        b = _polygon_kf(10, points=[[0.4, 0.0], [0.6, 0.0], [0.6, 0.2], [0.4, 0.2]])
+        b.expand_px = 12
+        result = interpolate_polygon(a, b, 5)
+        assert result.expand_px == 8
+
+    def test_endpoint_preserves_expand_px(self):
+        a = _ellipse_kf(0)
+        a.expand_px = 7
+        a.feather = 3
+        b = _ellipse_kf(10)
+        b.expand_px = 20
+        b.feather = 10
+        result_a = interpolate_ellipse(a, b, 0)
+        result_b = interpolate_ellipse(a, b, 10)
+        assert result_a.expand_px == 7
+        assert result_a.feather == 3
+        assert result_b.expand_px == 20
+        assert result_b.feather == 10
+
+
 class TestResolveForRenderPolygonInterpolation:
     def test_polygon_pair_within_gap_returns_interpolated(self):
         a = _polygon_kf(10, points=[[0.0, 0.0], [0.2, 0.0], [0.2, 0.2], [0.0, 0.2]])

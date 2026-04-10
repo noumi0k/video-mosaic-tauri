@@ -631,6 +631,25 @@ def _lerp_rotation(a_rot: float, b_rot: float, t: float) -> float:
     return a_rot + t * diff
 
 
+def _interpolate_optional_int(
+    a: int | None,
+    b: int | None,
+    t: float,
+) -> int | None:
+    """Interpolate optional int fields (expand_px, feather).
+
+    Both None → None.  One None → inherit the non-None value.
+    Both present → round(lerp).
+    """
+    if a is None and b is None:
+        return None
+    if a is None:
+        return b
+    if b is None:
+        return a
+    return round(_lerp(float(a), float(b), t))
+
+
 def _build_interpolated_kf(
     frame_idx: int,
     shape_type: str,
@@ -638,6 +657,8 @@ def _build_interpolated_kf(
     rotation: float,
     confidence: float,
     opacity: float,
+    expand_px: int | None = None,
+    feather: int | None = None,
 ) -> Keyframe:
     """Build an interpolated Keyframe from geometric components.
 
@@ -661,6 +682,8 @@ def _build_interpolated_kf(
         source="detector",
         rotation=rotation,
         opacity=opacity,
+        expand_px=expand_px,
+        feather=feather,
     )
 
 
@@ -733,10 +756,12 @@ def interpolate_ellipse(
     if t == 0.0:
         return _build_interpolated_kf(
             frame_idx, "ellipse", list(a.bbox), a.rotation, a.confidence, a.opacity,
+            expand_px=a.expand_px, feather=a.feather,
         )
     if t == 1.0:
         return _build_interpolated_kf(
             frame_idx, "ellipse", list(b.bbox), b.rotation, b.confidence, b.opacity,
+            expand_px=b.expand_px, feather=b.feather,
         )
 
     ibbox = [
@@ -752,6 +777,8 @@ def interpolate_ellipse(
         _lerp_rotation(a.rotation, b.rotation, t),
         _lerp(a.confidence, b.confidence, t),
         _lerp(a.opacity, b.opacity, t),
+        expand_px=_interpolate_optional_int(a.expand_px, b.expand_px, t),
+        feather=_interpolate_optional_int(a.feather, b.feather, t),
     )
 
 
@@ -957,6 +984,8 @@ def interpolate_polygon(
             source="detector",
             rotation=a.rotation,
             opacity=a.opacity,
+            expand_px=a.expand_px,
+            feather=a.feather,
         )
     if t == 1.0:
         return Keyframe(
@@ -968,6 +997,8 @@ def interpolate_polygon(
             source="detector",
             rotation=b.rotation,
             opacity=b.opacity,
+            expand_px=b.expand_px,
+            feather=b.feather,
         )
 
     # Resample + align + interpolate.
@@ -987,6 +1018,8 @@ def interpolate_polygon(
         source="detector",
         rotation=_lerp_rotation(a.rotation, b.rotation, t),
         opacity=_lerp(a.opacity, b.opacity, t),
+        expand_px=_interpolate_optional_int(a.expand_px, b.expand_px, t),
+        feather=_interpolate_optional_int(a.feather, b.feather, t),
     )
 
 
