@@ -650,6 +650,27 @@ class ProjectPaths:
         )
 
 
+def _bbox_iou(a: list[float], b: list[float]) -> float:
+    """Simple IoU for [x, y, w, h] bboxes."""
+    if len(a) < 4 or len(b) < 4:
+        return 0.0
+    ax1, ay1, aw, ah = a[0], a[1], a[2], a[3]
+    bx1, by1, bw, bh = b[0], b[1], b[2], b[3]
+    ix1 = max(ax1, bx1)
+    iy1 = max(ay1, by1)
+    ix2 = min(ax1 + aw, bx1 + bw)
+    iy2 = min(ay1 + ah, by1 + bh)
+    iw = max(0.0, ix2 - ix1)
+    ih = max(0.0, iy2 - iy1)
+    inter = iw * ih
+    if inter <= 0:
+        return 0.0
+    area_a = max(aw, 0) * max(ah, 0)
+    area_b = max(bw, 0) * max(bh, 0)
+    union = area_a + area_b - inter
+    return inter / union if union > 0 else 0.0
+
+
 @dataclass
 class ProjectDocument:
     project_id: str
@@ -732,6 +753,73 @@ class ProjectDocument:
         self.tracks = [
             track for track in self.tracks if not track.is_detection_replaceable()
         ] + detection_tracks
+
+    def merge_range_detection_tracks(
+        self,
+        detection_tracks: list[MaskTrack],
+        start_frame: int,
+        end_frame: int,
+        iou_threshold: float = 0.1,
+    ) -> None:
+        """Merge range-detection results into existing tracks using IoU matching.
+
+        For each new detection track, find the best matching existing track by
+        label + IoU.  If matched, replace only keyframes within [start_frame,
+        end_frame] while preserving manual keyframes.  Unmatched detection
+        tracks are added as new tracks.
+        """
+        self.apply_domain_rules()
+        used_existing: set[str] = set()
+
+        for det_track in detection_tracks:
+            best_match: MaskTrack | None = None
+            best_iou = iou_threshold
+            det_bbox = det_track.keyframes[0].bbox if det_track.keyframes else []
+
+            for existing in self.tracks:
+                if existing.track_id in used_existing:
+                    continue
+                # Find an existing keyframe near the detection range for IoU
+                ref_kf = None
+                for kf in existing.keyframes:
+                    if start_frame <= kf.frame_index <= end_frame:
+                        ref_kf = kf
+                        break
+                if ref_kf is None:
+                    continue
+                if not det_bbox or not ref_kf.bbox:
+                    continue
+                iou = _bbox_iou(det_bbox, ref_kf.bbox)
+                if iou > best_iou:
+                    best_iou = iou
+                    best_match = existing
+
+            if best_match is not None:
+                used_existing.add(best_match.track_id)
+                # Keep keyframes outside the range and manual keyframes inside.
+                kept = [
+                    kf for kf in best_match.keyframes
+                    if kf.frame_index < start_frame
+                    or kf.frame_index > end_frame
+                    or kf.source == "manual"
+                ]
+                # Add new detection keyframes within the range.
+                new_kfs = [
+                    kf for kf in det_track.keyframes
+                    if start_frame <= kf.frame_index <= end_frame
+                    # Don't overwrite manual keyframes.
+                    and not any(
+                        k.frame_index == kf.frame_index and k.source == "manual"
+                        for k in kept
+                    )
+                ]
+                best_match.keyframes = kept + new_kfs
+                best_match.keyframes.sort(key=lambda k: k.frame_index)
+                best_match.apply_domain_rules()
+            else:
+                self.tracks.append(det_track)
+
+        self.apply_domain_rules()
 
     @classmethod
     def from_payload(cls, payload: dict) -> "ProjectDocument":

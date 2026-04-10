@@ -150,7 +150,17 @@ def execute_detect(payload: dict) -> dict:
             },
         )
 
-    project.replace_detector_tracks(detection.tracks)
+    # Use IoU merge for range detection; full replace for whole-video detection.
+    start_frame = payload.get("start_frame")
+    end_frame = payload.get("end_frame")
+    if start_frame is not None and end_frame is not None:
+        project.merge_range_detection_tracks(
+            detection.tracks,
+            start_frame=int(start_frame),
+            end_frame=int(end_frame),
+        )
+    else:
+        project.replace_detector_tracks(detection.tracks)
 
     selection = {
         "track_id": detection.tracks[0].track_id if detection.tracks else None,

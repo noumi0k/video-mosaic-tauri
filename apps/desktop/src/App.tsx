@@ -1049,13 +1049,24 @@ export function App() {
   });
 
   // Autosave: save to disk every 60 seconds when dirty and project has a path.
+  // Also stores a recovery snapshot in localStorage for crash recovery.
   const autosaveTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   useEffect(() => {
     if (autosaveTimerRef.current) {
       clearInterval(autosaveTimerRef.current);
       autosaveTimerRef.current = null;
     }
-    if (!project?.project_path || !projectDirty) return;
+    if (!project || !projectDirty) return;
+    // Store recovery snapshot immediately on first dirty change.
+    try {
+      localStorage.setItem("auto-mosaic-recovery", JSON.stringify({
+        project,
+        readModel,
+        timestamp: new Date().toISOString(),
+      }));
+    } catch { /* localStorage quota exceeded — ignore */ }
+
+    if (!project.project_path) return;
     autosaveTimerRef.current = setInterval(() => {
       if (project?.project_path && projectDirty) {
         void handleSaveProject(false);
@@ -1065,6 +1076,41 @@ export function App() {
       if (autosaveTimerRef.current) clearInterval(autosaveTimerRef.current);
     };
   }, [project?.project_path, projectDirty]);
+
+  // Clear recovery snapshot after successful save.
+  useEffect(() => {
+    if (project && !projectDirty) {
+      localStorage.removeItem("auto-mosaic-recovery");
+    }
+  }, [project, projectDirty]);
+
+  // Startup: check for recovery snapshot.
+  useEffect(() => {
+    const raw = localStorage.getItem("auto-mosaic-recovery");
+    if (!raw) return;
+    try {
+      const recovery = JSON.parse(raw) as { project: ProjectDocument; readModel: ProjectReadModel; timestamp: string };
+      if (!recovery.project) return;
+      const ts = new Date(recovery.timestamp).toLocaleString();
+      if (window.confirm(`前回のセッション (${ts}) から未保存のプロジェクトが見つかりました。\n\n復元しますか？`)) {
+        setProject(recovery.project);
+        setReadModel(recovery.readModel);
+        setProjectDirty(true);
+        const sourcePath = recovery.project.video?.source_path ?? null;
+        if (sourcePath) {
+          try {
+            assertRawFilePathForBackend(sourcePath, "recovery-preview");
+            setPreviewSrc(convertFileSrc(sourcePath));
+          } catch { /* ignore */ }
+        }
+        setActivity("前回のセッションを復元しました");
+      } else {
+        localStorage.removeItem("auto-mosaic-recovery");
+      }
+    } catch {
+      localStorage.removeItem("auto-mosaic-recovery");
+    }
+  }, []);
 
   useEffect(() => {
     const activeJobIds = Object.values(runtimeJobs).filter((job) => isActiveRuntimeState(job.state)).map((job) => job.job_id);
