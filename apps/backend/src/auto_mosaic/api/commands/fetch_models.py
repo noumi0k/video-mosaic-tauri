@@ -12,6 +12,7 @@ from auto_mosaic.runtime.paths import ensure_runtime_dirs
 
 
 _HTML_SIGNATURES = (b"<!DOCTYPE", b"<html", b"<!doctype")
+_GIT_LFS_SIGNATURE = b"version https://git-lfs.github.com"
 _MIN_MODEL_BYTES = 1024
 
 
@@ -49,6 +50,15 @@ def _verify_downloaded_file(path: Path, spec: ModelSpec | None = None) -> None:
             "Downloaded file is an HTML page, not a model file."
             " The server returned an authentication error or redirect."
             " Check the download URL and required request headers."
+        )
+
+    # Git LFS pointer detection: the file is a ~130-byte text pointer,
+    # not the actual binary model.  Re-download with proper LFS handling.
+    head_bytes = path.read_bytes()[:256]
+    if _GIT_LFS_SIGNATURE in head_bytes:
+        raise ValueError(
+            "Downloaded file is a Git LFS pointer, not the actual model binary."
+            " Use the GitHub Releases API asset URL instead of the raw file URL."
         )
 
     if spec is not None:

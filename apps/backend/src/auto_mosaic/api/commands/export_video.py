@@ -46,6 +46,17 @@ def run(payload: dict) -> dict:
             {"field": "audio_mode"},
         )
 
+    resolution = str(options.get("resolution", "source"))
+    if resolution not in {"source", "720p", "1080p", "4k"}:
+        resolution = "source"
+
+    bitrate_kbps = options.get("bitrate_kbps")
+    if bitrate_kbps is not None:
+        try:
+            bitrate_kbps = int(bitrate_kbps)
+        except (TypeError, ValueError):
+            bitrate_kbps = None
+
     job_id = payload.get("job_id")
     if job_id is not None:
         job_id = str(job_id)
@@ -56,6 +67,8 @@ def run(payload: dict) -> dict:
         mosaic_strength=mosaic_strength,
         audio_mode=audio_mode,
         job_id=job_id,
+        resolution=resolution,
+        bitrate_kbps=bitrate_kbps,
     )
     if result["ok"]:
         return success("export-video", result["data"], result["warnings"])
