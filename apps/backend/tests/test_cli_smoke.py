@@ -931,6 +931,51 @@ def test_list_detect_jobs_marks_dead_running_job_interrupted(monkeypatch):
     assert response["data"]["recovered_interrupted"] == 1
 
 
+def test_list_detect_jobs_promotes_dead_running_job_when_result_exists(monkeypatch):
+    jobs_root = TEST_ROOT / "detect-job-result-reconcile-runtime"
+    monkeypatch.setattr("auto_mosaic.infra.ai.detect_jobs._jobs_root", lambda: jobs_root)
+    monkeypatch.setattr("auto_mosaic.infra.ai.detect_jobs._is_worker_alive", lambda _pid: False)
+
+    job_id = "detect-dead-running-with-result"
+    write_status(
+        job_id,
+        {
+            "job_id": job_id,
+            "state": "running",
+            "stage": "running_inference",
+            "percent": 42.0,
+            "message": "Running detector inference",
+            "current": 21,
+            "total": 50,
+            "worker_pid": 999999,
+        },
+    )
+    from auto_mosaic.infra.ai.detect_jobs import write_result
+
+    write_result(
+        job_id,
+        {
+            "ok": True,
+            "command": "detect-video",
+            "data": {"read_model": {"track_count": 3}},
+            "error": None,
+            "warnings": [],
+        },
+    )
+
+    response = list_detect_jobs.run({"limit": 5})
+    assert response["ok"] is True
+    job = response["data"]["jobs"][0]
+    assert job["job_id"] == job_id
+    assert job["state"] == "succeeded"
+    assert job["stage"] == "finalizing"
+    assert job["percent"] == 100.0
+    assert job["result_available"] is True
+    assert job["has_result"] is True
+    assert job["error"] is None
+    assert response["data"]["recovered_interrupted"] == 0
+
+
 def test_cleanup_detect_jobs_prunes_old_terminal_jobs(monkeypatch):
     jobs_root = TEST_ROOT / "detect-job-cleanup-runtime"
     monkeypatch.setattr("auto_mosaic.infra.ai.detect_jobs._jobs_root", lambda: jobs_root)

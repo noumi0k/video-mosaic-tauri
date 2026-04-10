@@ -1,0 +1,76 @@
+{
+  "project_version": 1,
+  "project_id": "pyside6-project-fixture-001",
+  "source_video_path": "C:\\video\\sample.mp4",
+  "video_meta": {
+    "width": 1920,
+    "height": 1080,
+    "fps": 30.0,
+    "frame_count": 300,
+    "duration_sec": 10.0
+  },
+  "mask_tracks": [
+    {
+      "track_id": "track-auto-001",
+      "label": "female_genitalia",
+      "start_frame": 10,
+      "end_frame": 20,
+      "visible": true,
+      "style": {
+        "mosaic_strength": 20,
+        "expand_px": 12,
+        "feather": 0
+      },
+      "keyframes": [
+        {
+          "frame_index": 10,
+          "shape_type": "ellipse",
+          "points": [],
+          "bbox": [0.1, 0.2, 0.2, 0.3],
+          "confidence": 0.92,
+          "source": "auto",
+          "contour_points": [],
+          "rotation": 0.0,
+          "opacity": 1.0,
+          "expand_px": null,
+          "feather": null
+        },
+        {
+          "frame_index": 15,
+          "shape_type": "ellipse",
+          "points": [],
+          "bbox": [0.12, 0.22, 0.2, 0.3],
+          "confidence": 1.0,
+          "source": "manual",
+          "contour_points": [],
+          "rotation": 0.0,
+          "opacity": 1.0,
+          "expand_px": null,
+          "feather": null
+        }
+      ],
+      "state": "active",
+      "source": "auto",
+      "last_detected_frame": 20,
+      "last_tracked_frame": 20,
+      "missing_frame_count": 0,
+      "confidence": 0.91,
+      "user_locked": true,
+      "motion_history": [],
+      "association_history": []
+    }
+  ],
+  "export_preset": {
+    "preset_name": "high_quality_1080p_mp4",
+    "container": "mp4",
+    "video_codec": "h264",
+    "audio_mode": "copy_if_possible",
+    "mosaic_strength": 20,
+    "resolution": "1080p",
+    "bitrate_mode": "auto",
+    "video_bitrate_kbps": 16000,
+    "fps_mode": "source",
+    "fps_value": 0.0,
+    "use_gpu": false
+  }
+}

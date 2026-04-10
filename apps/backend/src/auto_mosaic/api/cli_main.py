@@ -5,11 +5,47 @@ import json
 import os
 import sys
 from contextlib import contextmanager, redirect_stdout
+from importlib import import_module
+from typing import Callable
 
-from auto_mosaic.runtime.bootstrap import bootstrap_backend_environment
 from auto_mosaic.application.responses import failure
+from auto_mosaic.runtime.bootstrap import bootstrap_backend_environment
 
-COMMANDS: dict[str, object] | None = None
+COMMAND_MODULES: dict[str, str] = {
+    "doctor": "doctor",
+    "fetch-models": "fetch_models",
+    "setup-environment": "setup_environment",
+    "setup-erax": "setup_erax",
+    "gpu-status": "gpu_status",
+    "video-probe": "video_probe",
+    "open-video": "open_video",
+    "export-video": "export_video",
+    "cancel-export": "cancel_export",
+    "cancel-detect-job": "cancel_detect_job",
+    "cancel-runtime-job": "cancel_runtime_job",
+    "cleanup-detect-jobs": "cleanup_detect_jobs",
+    "get-export-status": "get_export_status",
+    "get-detect-status": "get_detect_status",
+    "get-runtime-job-status": "get_runtime_job_status",
+    "get-runtime-job-result": "get_runtime_job_result",
+    "get-detect-result": "get_detect_result",
+    "list-detect-jobs": "list_detect_jobs",
+    "create-project": "create_project",
+    "create-track": "create_track",
+    "detect-video": "detect_video",
+    "start-detect-job": "start_detect_job",
+    "start-runtime-job": "start_runtime_job",
+    "run-runtime-job": "run_runtime_job",
+    "run-detect-job": "run_detect_job",
+    "load-project": "load_project",
+    "save-project": "save_project",
+    "create-keyframe": "create_keyframe",
+    "move-keyframe": "move_keyframe",
+    "update-keyframe": "update_keyframe",
+    "delete-keyframe": "delete_keyframe",
+    "update-track": "update_track",
+}
+COMMAND_HANDLERS: dict[str, Callable[[dict], dict]] = {}
 
 
 def _configure_stdio() -> None:
@@ -63,84 +99,20 @@ def _json_stdout_guard():
                 _flush_captured_stdout(captured_stdout)
 
 
-def _load_commands() -> dict[str, object]:
-    global COMMANDS
-    if COMMANDS is not None:
-        return COMMANDS
+def _load_command_handler(command: str) -> Callable[[dict], dict] | None:
+    module_name = COMMAND_MODULES.get(command)
+    if module_name is None:
+        return None
+    if command in COMMAND_HANDLERS:
+        return COMMAND_HANDLERS[command]
 
     with _json_stdout_guard():
         _configure_stdio()
         bootstrap_backend_environment()
-        from auto_mosaic.api.commands import (
-            cancel_export,
-            cancel_detect_job,
-            cancel_runtime_job,
-            cleanup_detect_jobs,
-            create_keyframe,
-            create_project,
-            create_track,
-            detect_video,
-            delete_keyframe,
-            doctor,
-            export_video,
-            fetch_models,
-            get_detect_result,
-            get_detect_status,
-            get_export_status,
-            get_runtime_job_result,
-            get_runtime_job_status,
-            gpu_status,
-            list_detect_jobs,
-            load_project,
-            move_keyframe,
-            open_video,
-            run_runtime_job,
-            run_detect_job,
-            save_project,
-            start_detect_job,
-            start_runtime_job,
-            setup_environment,
-            setup_erax,
-            update_keyframe,
-            update_track,
-            video_probe,
-        )
-
-        COMMANDS = {
-            "doctor": doctor.run,
-            "fetch-models": fetch_models.run,
-            "setup-environment": setup_environment.run,
-            "setup-erax": setup_erax.run,
-            "gpu-status": gpu_status.run,
-            "video-probe": video_probe.run,
-            "open-video": open_video.run,
-            "export-video": export_video.run,
-            "cancel-export": cancel_export.run,
-            "cancel-detect-job": cancel_detect_job.run,
-            "cancel-runtime-job": cancel_runtime_job.run,
-            "cleanup-detect-jobs": cleanup_detect_jobs.run,
-            "get-export-status": get_export_status.run,
-            "get-detect-status": get_detect_status.run,
-            "get-runtime-job-status": get_runtime_job_status.run,
-            "get-runtime-job-result": get_runtime_job_result.run,
-            "get-detect-result": get_detect_result.run,
-            "list-detect-jobs": list_detect_jobs.run,
-            "create-project": create_project.run,
-            "create-track": create_track.run,
-            "detect-video": detect_video.run,
-            "start-detect-job": start_detect_job.run,
-            "start-runtime-job": start_runtime_job.run,
-            "run-runtime-job": run_runtime_job.run,
-            "run-detect-job": run_detect_job.run,
-            "load-project": load_project.run,
-            "save-project": save_project.run,
-            "create-keyframe": create_keyframe.run,
-            "move-keyframe": move_keyframe.run,
-            "update-keyframe": update_keyframe.run,
-            "delete-keyframe": delete_keyframe.run,
-            "update-track": update_track.run,
-        }
-    return COMMANDS
+        module = import_module(f"auto_mosaic.api.commands.{module_name}")
+        handler = getattr(module, "run")
+        COMMAND_HANDLERS[command] = handler
+        return handler
 
 
 def _read_payload() -> dict:
@@ -162,8 +134,7 @@ def main() -> int:
         return 2
 
     command = sys.argv[1]
-    commands = _load_commands()
-    handler = commands.get(command)
+    handler = _load_command_handler(command)
     if handler is None:
         sys.stdout.write(
             json.dumps(

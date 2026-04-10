@@ -146,6 +146,7 @@ def write_result(job_id: str, result: dict) -> None:
     status = read_status(job_id)
     if status is not None:
         status["result_size_bytes"] = path.stat().st_size
+        status["result_available"] = True
         write_status(job_id, status)
 
 
@@ -190,13 +191,28 @@ def reconcile_job_state(job_id: str) -> dict[str, Any] | None:
         return None
 
     state = str(status.get("state") or "")
+    if result_path(job_id).exists() and state != "succeeded":
+        completed_status = build_status(
+            job_id=job_id,
+            state="succeeded",
+            stage="finalizing",
+            percent=100.0,
+            message="Detection completed",
+            current=int(status.get("current") or 0),
+            total=int(status.get("total") or 0),
+            error=None,
+            result_available=True,
+            worker_pid=int(status.get("worker_pid") or 0) or None,
+        )
+        write_status(job_id, completed_status)
+        clear_runtime_state(job_id)
+        return read_status(job_id)
+
     if state not in ACTIVE_STATES:
         return status
 
     worker_pid = int(status.get("worker_pid") or 0)
     if _is_worker_alive(worker_pid):
-        return status
-    if result_path(job_id).exists():
         return status
 
     interrupted_message = (

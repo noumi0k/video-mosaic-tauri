@@ -145,6 +145,222 @@ def validate_raw_video_source_path(source_path: object) -> str:
     )
 
 
+def _is_pyside6_project_v1_payload(payload: dict[str, Any]) -> bool:
+    return (
+        "project_version" in payload
+        and "mask_tracks" in payload
+        and "source_video_path" in payload
+        and "video_meta" in payload
+    )
+
+
+def _coerce_pyside6_int(value: object, *, field: str, default: int | None = None) -> int:
+    if value is None and default is not None:
+        return default
+    try:
+        return int(value)  # type: ignore[arg-type]
+    except (TypeError, ValueError) as exc:
+        raise ProjectMigrationError(
+            "PYSIDE6_PROJECT_SCHEMA_INVALID",
+            "PySide6 project contains an invalid integer value.",
+            {"field": field, "value": value, "reason": str(exc)},
+        ) from exc
+
+
+def _coerce_pyside6_float(value: object, *, field: str, default: float | None = None) -> float:
+    if value is None and default is not None:
+        return default
+    try:
+        return float(value)  # type: ignore[arg-type]
+    except (TypeError, ValueError) as exc:
+        raise ProjectMigrationError(
+            "PYSIDE6_PROJECT_SCHEMA_INVALID",
+            "PySide6 project contains an invalid numeric value.",
+            {"field": field, "value": value, "reason": str(exc)},
+        ) from exc
+
+
+def _map_pyside6_keyframe_source(source: object) -> tuple[str, str | None, bool]:
+    normalized = str(source or "auto")
+    if normalized == "manual":
+        return "manual", None, True
+    if normalized == "anchor_fallback":
+        return "detector", "detector_anchored", False
+    if normalized in {"auto", "re-detected"}:
+        return "detector", "detector_accepted", False
+    if normalized in {"interpolated", "predicted"}:
+        return normalized, None, False
+    return normalized, None, False
+
+
+def _map_pyside6_track_source(source: object, *, user_edited: bool) -> str:
+    normalized = str(source or "auto")
+    if user_edited:
+        return "manual"
+    if normalized in {"auto", "re-detected"}:
+        return "detector"
+    if normalized == "user-adjusted":
+        return "manual"
+    return normalized
+
+
+def _migrate_pyside6_video_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    meta = payload.get("video_meta")
+    if not isinstance(meta, dict):
+        raise ProjectMigrationError(
+            "PYSIDE6_PROJECT_SCHEMA_INVALID",
+            "PySide6 project video_meta must be an object.",
+            {"video_meta": meta},
+        )
+    return {
+        "source_path": validate_raw_video_source_path(payload.get("source_video_path")),
+        "width": _coerce_pyside6_int(meta.get("width"), field="video_meta.width"),
+        "height": _coerce_pyside6_int(meta.get("height"), field="video_meta.height"),
+        "fps": _coerce_pyside6_float(meta.get("fps"), field="video_meta.fps"),
+        "frame_count": _coerce_pyside6_int(meta.get("frame_count"), field="video_meta.frame_count"),
+        "duration_sec": _coerce_pyside6_float(meta.get("duration_sec"), field="video_meta.duration_sec"),
+        "readable": True,
+        "warnings": [],
+        "errors": [],
+        "first_frame_shape": None,
+    }
+
+
+def _migrate_pyside6_keyframe_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    source, source_detail, is_locked = _map_pyside6_keyframe_source(payload.get("source"))
+    return {
+        "frame_index": _coerce_pyside6_int(payload.get("frame_index"), field="keyframes.frame_index"),
+        "shape_type": str(payload.get("shape_type", "ellipse")),
+        "points": list(payload.get("points") or []),
+        "bbox": list(payload.get("bbox") or [0.0, 0.0, 0.1, 0.1]),
+        "confidence": _coerce_pyside6_float(payload.get("confidence", 1.0), field="keyframes.confidence"),
+        "source": source,
+        "rotation": _coerce_pyside6_float(payload.get("rotation", 0.0), field="keyframes.rotation", default=0.0),
+        "opacity": _coerce_pyside6_float(payload.get("opacity", 1.0), field="keyframes.opacity", default=1.0),
+        "expand_px": payload.get("expand_px"),
+        "feather": payload.get("feather"),
+        "is_locked": is_locked,
+        "contour_points": list(payload.get("contour_points") or []),
+        "source_detail": source_detail,
+    }
+
+
+def _migrate_pyside6_segments(
+    *,
+    start_frame: int,
+    end_frame: int,
+    last_tracked_frame: int,
+    user_edited: bool,
+    has_keyframes: bool,
+) -> list[dict[str, Any]]:
+    if not has_keyframes or end_frame < start_frame:
+        return []
+
+    detected_state = "confirmed" if user_edited else "detected"
+    segments: list[dict[str, Any]] = [
+        {"start_frame": start_frame, "end_frame": end_frame, "state": detected_state}
+    ]
+    if last_tracked_frame > end_frame:
+        segments.append(
+            {"start_frame": end_frame + 1, "end_frame": last_tracked_frame, "state": "predicted"}
+        )
+    return segments
+
+
+def _migrate_pyside6_track_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    keyframes = [
+        _migrate_pyside6_keyframe_payload(item)
+        for item in payload.get("keyframes", [])
+        if isinstance(item, dict)
+    ]
+    user_locked = bool(payload.get("user_locked", False))
+    has_manual_keyframe = any(keyframe["source"] == "manual" for keyframe in keyframes)
+    source = str(payload.get("source", "auto"))
+    user_edited = user_locked or has_manual_keyframe or source == "user-adjusted"
+    start_frame = _coerce_pyside6_int(payload.get("start_frame"), field="tracks.start_frame", default=0)
+    end_frame = _coerce_pyside6_int(payload.get("end_frame"), field="tracks.end_frame", default=start_frame)
+    last_tracked_frame = _coerce_pyside6_int(
+        payload.get("last_tracked_frame"),
+        field="tracks.last_tracked_frame",
+        default=-1,
+    )
+    style = dict(payload.get("style") or {})
+    style["_pyside6_lifetime"] = {
+        "start_frame": start_frame,
+        "end_frame": end_frame,
+        "last_detected_frame": _coerce_pyside6_int(
+            payload.get("last_detected_frame"),
+            field="tracks.last_detected_frame",
+            default=-1,
+        ),
+        "last_tracked_frame": last_tracked_frame,
+        "missing_frame_count": _coerce_pyside6_int(
+            payload.get("missing_frame_count"),
+            field="tracks.missing_frame_count",
+            default=0,
+        ),
+    }
+    segments = _migrate_pyside6_segments(
+        start_frame=start_frame,
+        end_frame=end_frame,
+        last_tracked_frame=last_tracked_frame,
+        user_edited=user_edited,
+        has_keyframes=bool(keyframes),
+    )
+    return {
+        "track_id": str(payload["track_id"]),
+        "label": str(payload.get("label", payload["track_id"])),
+        "state": str(payload.get("state", "active")),
+        "source": _map_pyside6_track_source(source, user_edited=user_edited),
+        "visible": bool(payload.get("visible", True)),
+        "keyframes": keyframes,
+        "label_group": str(payload.get("label_group", "")),
+        "user_locked": user_locked,
+        "user_edited": user_edited,
+        "confidence": _coerce_pyside6_float(payload.get("confidence", 0.0), field="tracks.confidence", default=0.0),
+        "style": style,
+        "segments": segments,
+    }
+
+
+def _migrate_pyside6_export_preset(payload: object) -> dict[str, Any]:
+    preset = dict(payload) if isinstance(payload, dict) else {}
+    audio_mode = str(preset.get("audio_mode", "copy_if_possible"))
+    return normalize_export_preset(
+        {
+            "mosaic_strength": preset.get("mosaic_strength", DEFAULT_EXPORT_PRESET["mosaic_strength"]),
+            "audio_mode": "video_only" if audio_mode in {"video_only", "none"} else "mux_if_possible",
+            "last_output_dir": preset.get("last_output_dir"),
+        }
+    )
+
+
+def _migrate_pyside6_project_v1_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    version = _coerce_pyside6_int(payload.get("project_version"), field="project_version")
+    if version != 1:
+        raise ProjectMigrationError(
+            "PYSIDE6_PROJECT_VERSION_UNSUPPORTED",
+            "Only PySide6 project_version 1 can be migrated.",
+            {"project_version": version},
+        )
+    return {
+        "project_id": str(payload["project_id"]),
+        "version": str(payload.get("version", CURRENT_PROJECT_VERSION)),
+        "schema_version": CURRENT_PROJECT_SCHEMA_VERSION,
+        "name": str(payload.get("name") or payload.get("project_id") or "PySide6 Project"),
+        "project_path": payload.get("project_path"),
+        "video": _migrate_pyside6_video_payload(payload),
+        "tracks": [
+            _migrate_pyside6_track_payload(track)
+            for track in payload.get("mask_tracks", [])
+            if isinstance(track, dict)
+        ],
+        "detector_config": dict(payload.get("detector_config") or {}),
+        "export_preset": _migrate_pyside6_export_preset(payload.get("export_preset")),
+        "paths": dict(payload.get("paths") or {}),
+    }
+
+
 def _parse_schema_version(payload: dict[str, Any]) -> int:
     raw_value = payload.get("schema_version", 1)
     if isinstance(raw_value, bool):
@@ -184,6 +400,9 @@ def _parse_schema_version(payload: dict[str, Any]) -> int:
 
 def migrate_project_payload(payload: dict[str, Any]) -> tuple[dict[str, Any], int]:
     migrated = dict(payload)
+    if _is_pyside6_project_v1_payload(migrated):
+        return _migrate_pyside6_project_v1_payload(migrated), 1
+
     schema_version = _parse_schema_version(migrated)
     original_schema_version = schema_version
 
@@ -356,7 +575,7 @@ class MaskTrack:
         self.apply_domain_rules()
 
     def is_detection_replaceable(self) -> bool:
-        return self.source == "detector" and not self.user_edited
+        return self.source == "detector" and not self.user_edited and not self.user_locked
 
     def render_segments(self) -> list[MaskSegment]:
         explicit_segments = [segment for segment in self.segments if segment.is_renderable()]

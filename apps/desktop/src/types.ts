@@ -219,6 +219,7 @@ export type DetectJobSummary = {
   current: number;
   total: number;
   error?: CommandError | null;
+  result_available?: boolean;
   has_result?: boolean;
   has_cancel_flag?: boolean;
   result_size_bytes?: number;

@@ -121,6 +121,13 @@ function isTerminalDetectState(state: DetectJobSummary["state"]) {
   return state === "succeeded" || state === "failed" || state === "cancelled" || state === "interrupted";
 }
 
+function hasCollectableDetectResult(job: DetectJobSummary) {
+  return (
+    isTerminalDetectState(job.state) &&
+    (job.state === "succeeded" || Boolean(job.result_available) || Boolean(job.has_result))
+  );
+}
+
 export function App() {
   const run = async <T,>(command: string, payload: Record<string, unknown> = {}): Promise<CommandResponse<T>> => {
     try {
@@ -143,6 +150,7 @@ export function App() {
   const backend: BackendInvoker = run;
   const processedRuntimeJobsRef = useRef<Set<string>>(new Set());
   const processedDetectJobsRef = useRef<Set<string>>(new Set());
+  const collectingDetectJobsRef = useRef<Set<string>>(new Set());
 
   const [activity, setActivity] = useState<string>(uiText.activity.idle);
   const [errorMessage, setErrorMessage] = useState("");
@@ -519,7 +527,14 @@ export function App() {
       return;
     }
     setDetectModalOpen(false);
-    setDetectJobs((current) => ({ ...current, [response.data.job_id]: response.data.status }));
+    setErrorMessage("");
+    setDetectJobs((current) => {
+      const next = Object.fromEntries(
+        Object.entries(current).filter(([, job]) => isActiveDetectState(job.state)),
+      );
+      next[response.data.job_id] = response.data.status;
+      return next;
+    });
     setActivity(uiText.activity.detectStarted);
   }
 
@@ -635,48 +650,65 @@ export function App() {
   }, [backend, runtimeJobs]);
 
   useEffect(() => {
-    const activeJobIds = Object.values(detectJobs).filter((job) => isActiveDetectState(job.state)).map((job) => job.job_id);
-    if (!activeJobIds.length) return;
+    const pendingJobIds = Object.values(detectJobs)
+      .filter(
+        (job) =>
+          isActiveDetectState(job.state) ||
+          (hasCollectableDetectResult(job) && !processedDetectJobsRef.current.has(job.job_id)),
+      )
+      .map((job) => job.job_id);
+    if (!pendingJobIds.length) return;
     const timer = window.setInterval(() => {
       void Promise.all(
-        activeJobIds.map(async (jobId) => {
+        pendingJobIds.map(async (jobId) => {
           try {
-            const status = await pollDetectJobStatus(backend, jobId);
+            const currentStatus = detectJobs[jobId];
+            const shouldPollStatus = !currentStatus || isActiveDetectState(currentStatus.state);
+            const status = shouldPollStatus ? await pollDetectJobStatus(backend, jobId) : currentStatus;
             if (!status) return;
-            setDetectJobs((current) => ({ ...current, [jobId]: status }));
-            if (!isTerminalDetectState(status.state) || processedDetectJobsRef.current.has(jobId)) return;
-            processedDetectJobsRef.current.add(jobId);
-            if (status.state !== "succeeded") return;
+            if (shouldPollStatus) {
+              setDetectJobs((current) => ({ ...current, [jobId]: status }));
+            }
+            if (!hasCollectableDetectResult(status) || processedDetectJobsRef.current.has(jobId)) return;
+            if (collectingDetectJobsRef.current.has(jobId)) return;
+            collectingDetectJobsRef.current.add(jobId);
             // Fetch + apply result.  Any error here must surface — it must
             // not be silently swallowed by `void Promise.all`, or the UI
             // will continue to show the pre-detect state even though
             // result.json has been written on disk.
-            const result = await collectDetectJobResult(backend, jobId);
-            if (!result?.ok) {
-              console.error("[detect] collectDetectJobResult failed", { jobId, error: result?.error });
-              setErrorMessage(prettyError(result?.error) || "detect result fetch failed");
-              return;
-            }
-            const data = result.data as MutationResult & {
-              selection?: { track_id: string | null; frame_index: number | null };
-            };
-            if (!data?.project || !data?.read_model) {
-              console.error("[detect] malformed result.data — missing project/read_model", { jobId, data });
-              setErrorMessage("Detection returned an unexpected payload.");
-              return;
-            }
-            syncProjectState(data, { dirty: true });
-            // Apply selection from the detect result so the first detected
-            // track is focused and the timeline/canvas reveal the new
-            // tracks immediately.
-            if (data.selection) {
-              setSelectedTrackId(data.selection.track_id);
-              setSelectedKeyframeFrame(data.selection.frame_index);
-              if (data.selection.frame_index !== null) {
-                setCurrentFrame(data.selection.frame_index);
+            try {
+              const result = await collectDetectJobResult(backend, jobId);
+              if (!result?.ok) {
+                console.error("[detect] collectDetectJobResult failed", { jobId, error: result?.error });
+                setErrorMessage(prettyError(result?.error) || "detect result fetch failed");
+                return;
               }
+              const data = result.data as MutationResult & {
+                selection?: { track_id: string | null; frame_index: number | null };
+              };
+              if (!data?.project || !data?.read_model) {
+                console.error("[detect] malformed result.data — missing project/read_model", { jobId, data });
+                setErrorMessage("Detection returned an unexpected payload.");
+                processedDetectJobsRef.current.add(jobId);
+                return;
+              }
+              syncProjectState(data, { dirty: true });
+              // Apply selection from the detect result so the first detected
+              // track is focused and the timeline/canvas reveal the new
+              // tracks immediately.
+              if (data.selection) {
+                setSelectedTrackId(data.selection.track_id);
+                setSelectedKeyframeFrame(data.selection.frame_index);
+                if (data.selection.frame_index !== null) {
+                  setCurrentFrame(data.selection.frame_index);
+                }
+              }
+              processedDetectJobsRef.current.add(jobId);
+              setErrorMessage("");
+              setActivity(uiText.activity.detectCompleted);
+            } finally {
+              collectingDetectJobsRef.current.delete(jobId);
             }
-            setActivity(uiText.activity.detectCompleted);
           } catch (error) {
             // Silent failures here are what caused UI-vs-backend divergence
             // (backend result.json is good but UI keeps the old stale state).
