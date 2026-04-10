@@ -44,7 +44,8 @@ import {
   redoHistory,
   type EditorHistoryState,
 } from "./editorHistory";
-import { detectDangerousFrames } from "./dangerousFrames";
+import { detectDangerousFrames, type DangerousFrame } from "./dangerousFrames";
+import { DangerWarningsPanel } from "./components/DangerWarningsPanel";
 import { assertRawFilePathForBackend } from "./pathUtils";
 import { uiText } from "./uiText";
 import type {
@@ -202,6 +203,12 @@ export function App() {
   // In/Out frame markers for range detection
   const [inFrame, setInFrame] = useState<number | null>(null);
   const [outFrame, setOutFrame] = useState<number | null>(null);
+
+  // Dangerous frame warnings (updated when project tracks change)
+  const dangerWarnings = useMemo<DangerousFrame[]>(
+    () => (project ? detectDangerousFrames(project) : []),
+    [project],
+  );
 
   // ジョブ通知の dismiss 管理
   const [dismissedJobIds, setDismissedJobIds] = useState<Set<string>>(new Set());
@@ -1400,6 +1407,7 @@ export function App() {
             </div>
           </div>
         </section>
+        <DangerWarningsPanel warnings={dangerWarnings} onSeekFrame={handleSeekFrame} />
         <section className="nle-panel-section nle-panel-section--grow">
           <div className="nle-panel-header">{uiText.panels.models}</div>
           <div className="nle-panel-body">
@@ -1444,7 +1452,6 @@ export function App() {
                   ref={videoRef}
                   className="nle-preview-stage__video"
                   src={previewSrc}
-                  controls
                   onTimeUpdate={handleVideoTimeUpdate}
                 />
                 <CanvasStagePanel
@@ -1550,6 +1557,17 @@ export function App() {
         </div>
       </aside>
 
+      <div className="nle-transport">
+        <button className="nle-transport__btn" onClick={() => { setCurrentFrame(0); handleSeekFrame(0); }} title="先頭へ">⏮</button>
+        <button className="nle-transport__btn" onClick={() => { const f = Math.max(0, currentFrame - 1); setCurrentFrame(f); handleSeekFrame(f); }} title="1フレーム戻す">⏪</button>
+        <button className="nle-transport__btn nle-transport__btn--play" onClick={() => { if (videoRef.current) { videoRef.current.paused ? videoRef.current.play() : videoRef.current.pause(); } }} title="再生 / 一時停止">
+          {videoRef.current && !videoRef.current.paused ? "⏸" : "▶"}
+        </button>
+        <button className="nle-transport__btn" onClick={() => { const max = (currentVideo?.frame_count ?? 1) - 1; const f = Math.min(max, currentFrame + 1); setCurrentFrame(f); handleSeekFrame(f); }} title="1フレーム送る">⏩</button>
+        <button className="nle-transport__btn" onClick={() => { const last = (currentVideo?.frame_count ?? 1) - 1; setCurrentFrame(last); handleSeekFrame(last); }} title="末尾へ">⏭</button>
+        <span className="nle-transport__time">F{currentFrame}{currentVideo?.fps ? ` / ${(currentFrame / currentVideo.fps).toFixed(2)}s` : ""}</span>
+      </div>
+
       <section className="nle-timeline">
         <TimelineView
           readModel={readModel}
@@ -1559,6 +1577,7 @@ export function App() {
           currentFrame={currentFrame}
           inFrame={inFrame}
           outFrame={outFrame}
+          dangerMarkers={dangerWarnings}
           busy={keyframeEditorBusy}
           onSelectTrack={(trackId) => {
             setSelectedTrackId(trackId);

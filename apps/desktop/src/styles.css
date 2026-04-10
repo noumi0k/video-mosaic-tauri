@@ -80,13 +80,14 @@ body,
   width: 100vw;
   height: 100vh;
   grid-template-columns: 260px 1fr 300px;
-  grid-template-rows: 28px 40px auto 1fr 220px 24px;
+  grid-template-rows: 28px 40px auto 1fr 28px 220px 24px;
   grid-template-areas:
-    "menu    menu     menu"
-    "header  header   header"
-    "notice  notice   notice"
-    "left    preview  right"
-    "left    timeline right"
+    "menu      menu      menu"
+    "header    header    header"
+    "notice    notice    notice"
+    "left      preview   right"
+    "left      transport right"
+    "left      timeline  right"
     "status  status   status";
   overflow: hidden;
 }
@@ -1041,6 +1042,40 @@ body,
 .nle-kf-item--selected {
   background: var(--accent-dim);
   color: var(--text-bright);
+}
+
+/* ============================================================
+   Transport bar (between preview and timeline)
+   ============================================================ */
+.nle-transport {
+  grid-area: transport;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  padding: 2px 8px;
+  background: var(--bg-panel);
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+  min-height: 28px;
+}
+.nle-transport__btn {
+  background: none;
+  border: 1px solid var(--border-light);
+  color: var(--fg);
+  cursor: pointer;
+  padding: 2px 8px;
+  font-size: 0.85em;
+  border-radius: 3px;
+  line-height: 1;
+}
+.nle-transport__btn:hover { background: var(--bg-hover); }
+.nle-transport__btn--play { font-size: 1.1em; padding: 2px 12px; }
+.nle-transport__time {
+  margin-left: 12px;
+  font-size: 0.8em;
+  color: var(--fg-muted);
+  font-variant-numeric: tabular-nums;
 }
 
 /* ============================================================
@@ -2720,6 +2755,26 @@ details.nle-inspector-section:not([open]) > .nle-inspector-section__body {
   border-left: 5px solid transparent;
   border-right: 5px solid transparent;
   border-top: 6px solid var(--playhead);
+}
+
+/* Danger frame markers (triangle on ruler) */
+.nle-tlv__danger-marker {
+  position: absolute;
+  bottom: 0;
+  width: 0;
+  height: 0;
+  border-left: 5px solid transparent;
+  border-right: 5px solid transparent;
+  border-bottom: 7px solid #ff9800;
+  z-index: 4;
+  pointer-events: auto;
+  cursor: pointer;
+  transform: translateX(-50%);
+  opacity: 0.9;
+}
+.nle-tlv__danger-marker:hover {
+  opacity: 1;
+  border-bottom-width: 9px;
 }
 
 /* In/Out range markers */

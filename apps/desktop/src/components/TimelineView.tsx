@@ -1,5 +1,6 @@
 import { useRef, useState } from "react";
 import type { MaskTrack, ProjectReadModel } from "../types";
+import type { DangerousFrame } from "../dangerousFrames";
 import { segmentBarClass, kfMarkerClassFull } from "../timelineSegmentDisplay";
 
 type TimelineViewProps = {
@@ -11,6 +12,7 @@ type TimelineViewProps = {
   currentFrame: number;
   inFrame: number | null;
   outFrame: number | null;
+  dangerMarkers: DangerousFrame[];
   busy: boolean;
   onSelectTrack: (trackId: string) => void;
   onSelectKeyframe: (trackId: string, frameIndex: number) => void;
@@ -52,6 +54,7 @@ export function TimelineView({
   currentFrame,
   inFrame,
   outFrame,
+  dangerMarkers,
   busy,
   onSelectTrack,
   onSelectKeyframe,
@@ -185,6 +188,20 @@ export function TimelineView({
                   {label}
                 </div>
               ))}
+              {/* Danger frame markers */}
+              {dangerMarkers.map((d, i) => {
+                const pct = framePct(d.frameIndex);
+                const color = d.reason.includes("gap") ? "#ff9800" : d.reason.includes("Area") ? "#03a9f4" : "#e91e63";
+                return (
+                  <div
+                    key={`danger-${i}`}
+                    className="nle-tlv__danger-marker"
+                    style={{ left: pct, borderBottomColor: color }}
+                    title={`F${d.frameIndex}: ${d.reason}`}
+                    onClick={(e) => { e.stopPropagation(); onSeekFrame(d.frameIndex); }}
+                  />
+                );
+              })}
               {/* In/Out range markers */}
               {inPct !== null && <div className="nle-tlv__in-marker" style={{ left: inPct }} title={`In: F${inFrame}`} />}
               {outPct !== null && <div className="nle-tlv__out-marker" style={{ left: outPct }} title={`Out: F${outFrame}`} />}
