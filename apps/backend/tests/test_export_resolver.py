@@ -7,7 +7,7 @@ the keyframe shape at each frame.
 Unit tests (no video files):
   - exact keyframe → EXPLICIT
   - ellipse interpolation between two keyframes → INTERPOLATED
-  - polygon between two keyframes → HELD_FROM_PRIOR
+  - polygon between two keyframes → INTERPOLATED (polygon interpolation)
   - after last keyframe → None (export safety gate preserved)
   - before first keyframe → None
 
@@ -137,8 +137,8 @@ def test_resolver_interpolated_ellipse_between_keyframes() -> None:
     assert abs(keyframe.bbox[0] - 0.3) < 1e-5
 
 
-def test_resolver_held_from_prior_when_polygon() -> None:
-    """Polygon keyframes cannot be interpolated — returns HELD_FROM_PRIOR."""
+def test_resolver_interpolated_when_polygon() -> None:
+    """Polygon keyframes within gap limit are interpolated (polygon interpolation)."""
     kf0 = _kf(0, "polygon", [0.1, 0.1, 0.2, 0.2])
     kf8 = _kf(8, "polygon", [0.5, 0.1, 0.2, 0.2])
     track = _track_with(kf0, kf8)
@@ -146,10 +146,9 @@ def test_resolver_held_from_prior_when_polygon() -> None:
     result = resolve_for_render(track, 4)
     assert result is not None
     keyframe, reason = result
-    assert reason == ResolveReason.HELD_FROM_PRIOR
-    # Must return the prior keyframe (frame 0), not an interpolated one.
-    assert keyframe.frame_index == 0
-    assert abs(keyframe.bbox[0] - 0.1) < 1e-6
+    assert reason == ResolveReason.INTERPOLATED
+    # Midpoint x should be approximately (0.1 + 0.5) / 2 = 0.3
+    assert abs(keyframe.bbox[0] - 0.3) < 0.05
 
 
 def test_resolver_held_from_prior_when_gap_exceeds_limit() -> None:
@@ -290,15 +289,15 @@ def test_export_uses_interpolated_ellipse_position_at_midframe() -> None:
     )
 
 
-def test_export_polygon_uses_held_from_prior_not_interpolated() -> None:
+def test_export_polygon_uses_interpolation() -> None:
     """
-    Polygon tracks must not interpolate: the mid-frame must show mosaic at
-    the kf0 position (held), not at a synthetic interpolated position.
+    Polygon tracks interpolate between keyframes: the mid-frame must show
+    mosaic at the interpolated position (center), not only at kf0 (left).
 
     Geometry (160×90):
       kf0 polygon bbox=[0.0, 0.1, 0.2, 0.7]  left region  (col 0-32)
       kf8 polygon bbox=[0.6, 0.1, 0.2, 0.7]  right region (col 96-128)
-      frame 4 must use kf0 shape → left region mosaicked, center clean.
+      frame 4 interpolated → center region mosaicked.
     """
     source_path = _TEST_DIR / "polygon-source.mp4"
     output_path = _TEST_DIR / "polygon-output.avi"
@@ -350,16 +349,10 @@ def test_export_polygon_uses_held_from_prior_not_interpolated() -> None:
             frame_o[ys:ye, xs:xe].astype(np.int16) - frame_s[ys:ye, xs:xe].astype(np.int16)
         )))
 
-    # kf0 polygon region (left): should be mosaicked (held from prior).
-    left_diff = _diff(src_frame, out_frame, 25, 55, 4, 28)
-    # Hypothetical interpolated center: should NOT be mosaicked.
+    # Interpolated center: should be mosaicked (polygon interpolation at midpoint).
     center_diff = _diff(src_frame, out_frame, 25, 55, 52, 76)
-
-    assert left_diff > 5.0, (
-        f"Expected polygon held-from-prior at left region (diff={left_diff:.2f} ≤ 5.0)."
-    )
-    assert center_diff < 10.0, (
-        f"Expected no mosaic at center (no polygon interpolation, diff={center_diff:.2f} > 10.0)."
+    assert center_diff > 5.0, (
+        f"Expected polygon interpolation mosaic at center (diff={center_diff:.2f} ≤ 5.0)."
     )
 
 

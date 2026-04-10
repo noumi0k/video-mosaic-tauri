@@ -53,9 +53,12 @@ _FAIL_COUNT_FOR_ACCEPT_ANCHORED: int = 2
 """accept_anchored tolerates at most this many soft-fails (no hard rejects)."""
 
 _INTERPOLATE_MAX_GAP: int = 30
-"""Maximum keyframe span (frames) for which ellipse interpolation is allowed in
+"""Maximum keyframe span (frames) for which interpolation is allowed in
 resolve_for_render.  Matches _FRAME_GAP_REJECT so that any span that would be
 hard-rejected by the continuity evaluator is also too wide for interpolation."""
+
+_POLYGON_MIN_VERTICES: int = 3
+"""Minimum polygon vertex count required for interpolation."""
 
 _MANUAL_SOURCES: frozenset[str] = frozenset({"manual"})
 """source values that count as a manual anchor.
@@ -753,6 +756,241 @@ def interpolate_ellipse(
 
 
 # ---------------------------------------------------------------------------
+# Polygon interpolation helpers (ported from PySide6 interpolation.py)
+# ---------------------------------------------------------------------------
+
+def _cumulative_arc_lengths(points: list[list[float]]) -> list[float]:
+    """Cumulative arc lengths for a closed polygon.  First entry is 0.0,
+    last entry is the total perimeter (includes the closing edge)."""
+    n = len(points)
+    lengths = [0.0]
+    for i in range(1, n):
+        dx = points[i][0] - points[i - 1][0]
+        dy = points[i][1] - points[i - 1][1]
+        lengths.append(lengths[-1] + math.hypot(dx, dy))
+    # Closing edge back to first vertex.
+    dx = points[0][0] - points[-1][0]
+    dy = points[0][1] - points[-1][1]
+    lengths.append(lengths[-1] + math.hypot(dx, dy))
+    return lengths
+
+
+def _resample_polygon(
+    points: list[list[float]],
+    target_count: int,
+) -> list[list[float]]:
+    """Resample a closed polygon to *target_count* equidistant vertices.
+
+    Arc-length parameterisation ensures that different vertex counts produce
+    naturally corresponding vertices for smooth interpolation.
+    """
+    if len(points) < 2 or target_count < _POLYGON_MIN_VERTICES:
+        return [list(pt) for pt in points]
+    if len(points) == target_count:
+        return [list(pt) for pt in points]
+
+    cum = _cumulative_arc_lengths(points)
+    total_len = cum[-1]
+    if total_len < 1e-9:
+        return [list(points[0]) for _ in range(target_count)]
+
+    step = total_len / target_count
+    n = len(points)
+    closed_pts = [list(pt) for pt in points] + [list(points[0])]
+
+    result: list[list[float]] = []
+    seg_idx = 0
+
+    for i in range(target_count):
+        target_len = i * step
+        while seg_idx < n and cum[seg_idx + 1] < target_len:
+            seg_idx += 1
+        if seg_idx >= n:
+            seg_idx = n - 1
+
+        seg_start_len = cum[seg_idx]
+        seg_end_len = cum[seg_idx + 1]
+        seg_span = seg_end_len - seg_start_len
+
+        if seg_span < 1e-12:
+            local_t = 0.0
+        else:
+            local_t = (target_len - seg_start_len) / seg_span
+
+        px = closed_pts[seg_idx][0] + (closed_pts[seg_idx + 1][0] - closed_pts[seg_idx][0]) * local_t
+        py = closed_pts[seg_idx][1] + (closed_pts[seg_idx + 1][1] - closed_pts[seg_idx][1]) * local_t
+        result.append([px, py])
+
+    return result
+
+
+def _align_polygon_start(
+    points_a: list[list[float]],
+    points_b: list[list[float]],
+) -> list[list[float]]:
+    """Rotate the start vertex of *points_b* to minimise total distance to *points_a*.
+
+    Prevents twist artefacts when interpolating between two polygons.
+    """
+    n = len(points_a)
+    if n != len(points_b) or n == 0:
+        return [list(pt) for pt in points_b]
+
+    best_offset = 0
+    best_dist = float("inf")
+
+    for offset in range(n):
+        total = 0.0
+        for i in range(n):
+            j = (i + offset) % n
+            dx = points_a[i][0] - points_b[j][0]
+            dy = points_a[i][1] - points_b[j][1]
+            total += dx * dx + dy * dy
+        if total < best_dist:
+            best_dist = total
+            best_offset = offset
+
+    if best_offset == 0:
+        return [list(pt) for pt in points_b]
+
+    return [list(pt) for pt in points_b[best_offset:] + points_b[:best_offset]]
+
+
+def _prepare_polygon_pair(
+    points_a: list[list[float]],
+    points_b: list[list[float]],
+) -> tuple[list[list[float]], list[list[float]]]:
+    """Resample both polygons to equal vertex counts and align start vertices.
+
+    Returns a pair of same-length, optimally-aligned vertex lists ready for
+    per-vertex linear interpolation.
+    """
+    if not points_a or not points_b:
+        return [list(pt) for pt in points_a], [list(pt) for pt in points_b]
+
+    target = max(len(points_a), len(points_b))
+    resampled_a = _resample_polygon(points_a, target)
+    resampled_b = _resample_polygon(points_b, target)
+    aligned_b = _align_polygon_start(resampled_a, resampled_b)
+    return resampled_a, aligned_b
+
+
+def _bbox_from_points(points: list[list[float]]) -> list[float]:
+    """Compute [x, y, w, h] bounding box from a list of [x, y] points."""
+    xs = [pt[0] for pt in points]
+    ys = [pt[1] for pt in points]
+    min_x = min(xs)
+    min_y = min(ys)
+    return [min_x, min_y, max(xs) - min_x, max(ys) - min_y]
+
+
+# ---------------------------------------------------------------------------
+# W6b: interpolate_polygon
+# ---------------------------------------------------------------------------
+
+def interpolate_polygon(
+    a: Keyframe,
+    b: Keyframe,
+    frame_idx: int,
+) -> Keyframe:
+    """Return an interpolated polygon Keyframe at frame_idx between a and b.
+
+    Pure function — does not mutate a or b, no side effects.
+
+    Interpolated fields:
+      - points:     per-vertex linear after resample + alignment
+      - bbox:       derived from interpolated points
+      - rotation:   shortest-path linear
+      - confidence: linear
+      - opacity:    linear
+
+    Both keyframes must have shape_type == "polygon" and non-empty points.
+    Output source is always "detector".
+
+    At exact endpoint frames the geometry of the respective anchor is returned
+    verbatim to avoid floating-point drift.
+
+    Args:
+        a:         Earlier keyframe (a.frame_index < b.frame_index).
+        b:         Later keyframe.
+        frame_idx: Target frame in [a.frame_index, b.frame_index].
+
+    Raises:
+        ValueError: on invalid shape_type, ordering, or range.
+    """
+    if a.shape_type != "polygon":
+        raise ValueError(
+            f"interpolate_polygon: a (frame {a.frame_index}) has shape_type "
+            f"'{a.shape_type}', expected 'polygon'."
+        )
+    if b.shape_type != "polygon":
+        raise ValueError(
+            f"interpolate_polygon: b (frame {b.frame_index}) has shape_type "
+            f"'{b.shape_type}', expected 'polygon'."
+        )
+    if not a.points or not b.points:
+        raise ValueError(
+            "interpolate_polygon: both keyframes must have non-empty points."
+        )
+    if a.frame_index >= b.frame_index:
+        raise ValueError(
+            f"interpolate_polygon: a.frame_index ({a.frame_index}) must be "
+            f"strictly less than b.frame_index ({b.frame_index})."
+        )
+    if not (a.frame_index <= frame_idx <= b.frame_index):
+        raise ValueError(
+            f"interpolate_polygon: frame_idx ({frame_idx}) must be in "
+            f"[{a.frame_index}, {b.frame_index}]."
+        )
+
+    span = b.frame_index - a.frame_index
+    t = (frame_idx - a.frame_index) / span
+
+    # Exact endpoint — return verbatim geometry.
+    if t == 0.0:
+        return Keyframe(
+            frame_index=frame_idx,
+            shape_type="polygon",
+            points=[list(pt) for pt in a.points],
+            bbox=list(a.bbox),
+            confidence=a.confidence,
+            source="detector",
+            rotation=a.rotation,
+            opacity=a.opacity,
+        )
+    if t == 1.0:
+        return Keyframe(
+            frame_index=frame_idx,
+            shape_type="polygon",
+            points=[list(pt) for pt in b.points],
+            bbox=list(b.bbox),
+            confidence=b.confidence,
+            source="detector",
+            rotation=b.rotation,
+            opacity=b.opacity,
+        )
+
+    # Resample + align + interpolate.
+    aligned_a, aligned_b = _prepare_polygon_pair(a.points, b.points)
+    interp_points = [
+        [_lerp(pa[0], pb[0], t), _lerp(pa[1], pb[1], t)]
+        for pa, pb in zip(aligned_a, aligned_b)
+    ]
+    interp_bbox = _bbox_from_points(interp_points)
+
+    return Keyframe(
+        frame_index=frame_idx,
+        shape_type="polygon",
+        points=interp_points,
+        bbox=interp_bbox,
+        confidence=_lerp(a.confidence, b.confidence, t),
+        source="detector",
+        rotation=_lerp_rotation(a.rotation, b.rotation, t),
+        opacity=_lerp(a.opacity, b.opacity, t),
+    )
+
+
+# ---------------------------------------------------------------------------
 # W7: resolve_for_render
 # ---------------------------------------------------------------------------
 
@@ -809,11 +1047,19 @@ def resolve_for_render(
     # ── Interpolation check ───────────────────────────────────────────────
     if (
         next_kf is not None
-        and prior_kf.shape_type == "ellipse"
-        and next_kf.shape_type == "ellipse"
+        and prior_kf.shape_type == next_kf.shape_type
         and (next_kf.frame_index - prior_kf.frame_index) <= _INTERPOLATE_MAX_GAP
     ):
-        return (interpolate_ellipse(prior_kf, next_kf, frame_idx), ResolveReason.INTERPOLATED)
+        if prior_kf.shape_type == "ellipse":
+            return (interpolate_ellipse(prior_kf, next_kf, frame_idx), ResolveReason.INTERPOLATED)
+        if (
+            prior_kf.shape_type == "polygon"
+            and prior_kf.points
+            and next_kf.points
+            and len(prior_kf.points) >= _POLYGON_MIN_VERTICES
+            and len(next_kf.points) >= _POLYGON_MIN_VERTICES
+        ):
+            return (interpolate_polygon(prior_kf, next_kf, frame_idx), ResolveReason.INTERPOLATED)
 
     # ── Held from prior ───────────────────────────────────────────────────
     return (prior_kf, ResolveReason.HELD_FROM_PRIOR)
@@ -879,11 +1125,19 @@ def resolve_for_editing(
     if (
         next_kf is not None
         and prior_kf is not None          # for type narrowing; always True (see above)
-        and prior_kf.shape_type == "ellipse"
-        and next_kf.shape_type == "ellipse"
+        and prior_kf.shape_type == next_kf.shape_type
         and (next_kf.frame_index - prior_kf.frame_index) <= _INTERPOLATE_MAX_GAP
     ):
-        return (interpolate_ellipse(prior_kf, next_kf, frame_idx), ResolveReason.INTERPOLATED)
+        if prior_kf.shape_type == "ellipse":
+            return (interpolate_ellipse(prior_kf, next_kf, frame_idx), ResolveReason.INTERPOLATED)
+        if (
+            prior_kf.shape_type == "polygon"
+            and prior_kf.points
+            and next_kf.points
+            and len(prior_kf.points) >= _POLYGON_MIN_VERTICES
+            and len(next_kf.points) >= _POLYGON_MIN_VERTICES
+        ):
+            return (interpolate_polygon(prior_kf, next_kf, frame_idx), ResolveReason.INTERPOLATED)
 
     # ── Held from prior (including after last keyframe) ───────────────────
     # prior_kf is the last keyframe when frame_idx is beyond all keyframes.

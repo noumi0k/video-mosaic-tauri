@@ -25,6 +25,7 @@ from auto_mosaic.domain.mask_continuity import (
     evaluate_continuity,
     get_active_manual_anchor,
     interpolate_ellipse,
+    interpolate_polygon,
     resolve_for_editing,
     resolve_for_render,
 )
@@ -1340,22 +1341,14 @@ class TestResolveForRenderHeldFromPrior:
         assert reason == ResolveReason.HELD_FROM_PRIOR
         assert kf is a
 
-    def test_polygon_pair_returns_held(self):
-        a = _kf(10, "manual", shape_type="polygon")
-        b = _kf(20, "manual", shape_type="polygon")
-        track = _track(a, b)
-        kf, reason = resolve_for_render(track, 15)
-        assert reason == ResolveReason.HELD_FROM_PRIOR
-        assert kf is a
-
-    def test_prior_ellipse_next_polygon_returns_held(self):
+    def test_mixed_ellipse_polygon_returns_held(self):
         a = _ellipse_kf(10)
         b = _kf(20, "manual", shape_type="polygon")
         track = _track(a, b)
         _, reason = resolve_for_render(track, 15)
         assert reason == ResolveReason.HELD_FROM_PRIOR
 
-    def test_prior_polygon_next_ellipse_returns_held(self):
+    def test_mixed_polygon_ellipse_returns_held(self):
         a = _kf(10, "manual", shape_type="polygon")
         b = _ellipse_kf(20)
         track = _track(a, b)
@@ -1575,22 +1568,22 @@ class TestResolveForEditingHeldFromPrior:
         assert reason == ResolveReason.HELD_FROM_PRIOR
         assert kf is a
 
-    def test_polygon_pair_returns_held(self):
-        a = _kf(10, "manual", shape_type="polygon")
-        b = _kf(20, "manual", shape_type="polygon")
+    def test_polygon_gap_over_limit_returns_held(self):
+        a = _kf(0, "manual", shape_type="polygon")
+        b = _kf(31, "manual", shape_type="polygon")
         track = _track(a, b)
         kf, reason = resolve_for_editing(track, 15)
         assert reason == ResolveReason.HELD_FROM_PRIOR
         assert kf is a
 
-    def test_prior_ellipse_next_polygon_returns_held(self):
+    def test_mixed_ellipse_polygon_returns_held(self):
         a = _ellipse_kf(10)
         b = _kf(20, "manual", shape_type="polygon")
         track = _track(a, b)
         _, reason = resolve_for_editing(track, 15)
         assert reason == ResolveReason.HELD_FROM_PRIOR
 
-    def test_prior_polygon_next_ellipse_returns_held(self):
+    def test_mixed_polygon_ellipse_returns_held(self):
         a = _kf(10, "manual", shape_type="polygon")
         b = _ellipse_kf(20)
         track = _track(a, b)
@@ -1716,3 +1709,217 @@ class TestResolveForEditingPurity:
         orig_seg_count = len(track.segments)
         resolve_for_editing(track, 5)
         assert len(track.segments) == orig_seg_count
+
+
+# ---------------------------------------------------------------------------
+# W6b: interpolate_polygon — helper
+# ---------------------------------------------------------------------------
+
+def _polygon_kf(
+    frame: int,
+    points: list[list[float]] | None = None,
+    bbox: list[float] | None = None,
+    rotation: float = 0.0,
+    confidence: float = 0.9,
+    opacity: float = 1.0,
+    source: str = "manual",
+) -> Keyframe:
+    """Build a polygon Keyframe for interpolation tests."""
+    pts = points if points is not None else [
+        [0.1, 0.1], [0.3, 0.1], [0.3, 0.3], [0.1, 0.3],
+    ]
+    if bbox is None:
+        xs = [p[0] for p in pts]
+        ys = [p[1] for p in pts]
+        bbox = [min(xs), min(ys), max(xs) - min(xs), max(ys) - min(ys)]
+    return Keyframe(
+        frame_index=frame,
+        shape_type="polygon",
+        points=[list(p) for p in pts],
+        bbox=list(bbox),
+        confidence=confidence,
+        source=source,
+        rotation=rotation,
+        opacity=opacity,
+    )
+
+
+# ---------------------------------------------------------------------------
+# W6b: interpolate_polygon — endpoint behavior
+# ---------------------------------------------------------------------------
+
+class TestInterpolatePolygonEndpoints:
+    def test_at_frame_a_returns_a_geometry(self):
+        a = _polygon_kf(10, confidence=0.8)
+        b = _polygon_kf(20, points=[[0.5, 0.5], [0.7, 0.5], [0.7, 0.7], [0.5, 0.7]], confidence=1.0)
+        result = interpolate_polygon(a, b, 10)
+        assert result.frame_index == 10
+        for i, pt in enumerate(result.points):
+            assert pt == pytest.approx(a.points[i])
+        assert result.confidence == pytest.approx(a.confidence)
+
+    def test_at_frame_b_returns_b_geometry(self):
+        a = _polygon_kf(10)
+        b = _polygon_kf(20, points=[[0.5, 0.5], [0.7, 0.5], [0.7, 0.7], [0.5, 0.7]], confidence=1.0)
+        result = interpolate_polygon(a, b, 20)
+        assert result.frame_index == 20
+        for i, pt in enumerate(result.points):
+            assert pt == pytest.approx(b.points[i])
+        assert result.confidence == pytest.approx(b.confidence)
+
+
+# ---------------------------------------------------------------------------
+# W6b: interpolate_polygon — midpoint
+# ---------------------------------------------------------------------------
+
+class TestInterpolatePolygonMidpoint:
+    def test_midpoint_bbox_is_average(self):
+        a = _polygon_kf(0, points=[[0.0, 0.0], [0.2, 0.0], [0.2, 0.2], [0.0, 0.2]])
+        b = _polygon_kf(10, points=[[0.6, 0.0], [0.8, 0.0], [0.8, 0.2], [0.6, 0.2]])
+        result = interpolate_polygon(a, b, 5)
+        assert result.shape_type == "polygon"
+        # Midpoint bbox x should be around 0.3
+        assert abs(result.bbox[0] - 0.3) < 0.05
+
+    def test_midpoint_points_interpolated(self):
+        a = _polygon_kf(0, points=[[0.0, 0.0], [0.2, 0.0], [0.2, 0.2], [0.0, 0.2]])
+        b = _polygon_kf(10, points=[[0.4, 0.0], [0.6, 0.0], [0.6, 0.2], [0.4, 0.2]])
+        result = interpolate_polygon(a, b, 5)
+        # Same vertex count, no resampling needed.  Midpoint of vertex 0: (0.0+0.4)/2 = 0.2
+        assert abs(result.points[0][0] - 0.2) < 1e-6
+        assert abs(result.points[0][1] - 0.0) < 1e-6
+
+    def test_midpoint_confidence_interpolated(self):
+        a = _polygon_kf(0, confidence=0.6)
+        b = _polygon_kf(10, confidence=1.0)
+        result = interpolate_polygon(a, b, 5)
+        assert result.confidence == pytest.approx(0.8)
+
+    def test_midpoint_opacity_interpolated(self):
+        a = _polygon_kf(0, opacity=0.0)
+        b = _polygon_kf(10, opacity=1.0)
+        result = interpolate_polygon(a, b, 5)
+        assert result.opacity == pytest.approx(0.5)
+
+    def test_source_is_detector(self):
+        a = _polygon_kf(0)
+        b = _polygon_kf(10)
+        result = interpolate_polygon(a, b, 5)
+        assert result.source == "detector"
+
+
+# ---------------------------------------------------------------------------
+# W6b: interpolate_polygon — different vertex counts
+# ---------------------------------------------------------------------------
+
+class TestInterpolatePolygonResample:
+    def test_different_vertex_count_interpolates(self):
+        # Triangle vs pentagon — both get resampled to 5 vertices.
+        tri = _polygon_kf(0, points=[[0.0, 0.0], [0.2, 0.0], [0.1, 0.2]])
+        pent = _polygon_kf(10, points=[
+            [0.4, 0.0], [0.6, 0.0], [0.7, 0.15], [0.5, 0.3], [0.3, 0.15],
+        ])
+        result = interpolate_polygon(tri, pent, 5)
+        assert result.shape_type == "polygon"
+        assert len(result.points) == 5
+
+    def test_resampled_midpoint_has_valid_bbox(self):
+        tri = _polygon_kf(0, points=[[0.0, 0.0], [0.2, 0.0], [0.1, 0.2]])
+        quad = _polygon_kf(10, points=[[0.4, 0.0], [0.6, 0.0], [0.6, 0.2], [0.4, 0.2]])
+        result = interpolate_polygon(tri, quad, 5)
+        # bbox should be derived from the interpolated points.
+        assert len(result.bbox) == 4
+        assert result.bbox[2] > 0  # width > 0
+        assert result.bbox[3] > 0  # height > 0
+
+
+# ---------------------------------------------------------------------------
+# W6b: interpolate_polygon — validation
+# ---------------------------------------------------------------------------
+
+class TestInterpolatePolygonValidation:
+    def test_rejects_ellipse_a(self):
+        a = _ellipse_kf(0)
+        b = _polygon_kf(10)
+        with pytest.raises(ValueError, match="polygon"):
+            interpolate_polygon(a, b, 5)
+
+    def test_rejects_ellipse_b(self):
+        a = _polygon_kf(0)
+        b = _ellipse_kf(10)
+        with pytest.raises(ValueError, match="polygon"):
+            interpolate_polygon(a, b, 5)
+
+    def test_rejects_empty_points(self):
+        a = _polygon_kf(0, points=[], bbox=[0.0, 0.0, 0.1, 0.1])
+        b = _polygon_kf(10)
+        with pytest.raises(ValueError, match="non-empty"):
+            interpolate_polygon(a, b, 5)
+
+    def test_rejects_reversed_order(self):
+        a = _polygon_kf(10)
+        b = _polygon_kf(0)
+        with pytest.raises(ValueError):
+            interpolate_polygon(a, b, 5)
+
+    def test_rejects_frame_out_of_range(self):
+        a = _polygon_kf(0)
+        b = _polygon_kf(10)
+        with pytest.raises(ValueError):
+            interpolate_polygon(a, b, 15)
+
+
+# ---------------------------------------------------------------------------
+# W6b: interpolate_polygon — purity
+# ---------------------------------------------------------------------------
+
+class TestInterpolatePolygonPurity:
+    def test_does_not_mutate_a_or_b(self):
+        a = _polygon_kf(0)
+        b = _polygon_kf(10, points=[[0.5, 0.5], [0.7, 0.5], [0.7, 0.7], [0.5, 0.7]])
+        orig_a_pts = [list(p) for p in a.points]
+        orig_b_pts = [list(p) for p in b.points]
+        interpolate_polygon(a, b, 5)
+        assert a.points == orig_a_pts
+        assert b.points == orig_b_pts
+
+
+# ---------------------------------------------------------------------------
+# Resolve polygon interpolation (W7/W8 with polygon)
+# ---------------------------------------------------------------------------
+
+class TestResolveForRenderPolygonInterpolation:
+    def test_polygon_pair_within_gap_returns_interpolated(self):
+        a = _polygon_kf(10, points=[[0.0, 0.0], [0.2, 0.0], [0.2, 0.2], [0.0, 0.2]])
+        b = _polygon_kf(20, points=[[0.6, 0.0], [0.8, 0.0], [0.8, 0.2], [0.6, 0.2]])
+        track = _track(a, b)
+        kf, reason = resolve_for_render(track, 15)
+        assert reason == ResolveReason.INTERPOLATED
+        # Midpoint x should be approximately 0.3
+        assert abs(kf.bbox[0] - 0.3) < 0.05
+
+    def test_polygon_gap_over_limit_returns_held(self):
+        a = _polygon_kf(0)
+        b = _polygon_kf(31)
+        track = _track(a, b)
+        kf, reason = resolve_for_render(track, 15)
+        assert reason == ResolveReason.HELD_FROM_PRIOR
+        assert kf is a
+
+
+class TestResolveForEditingPolygonInterpolation:
+    def test_polygon_pair_within_gap_returns_interpolated(self):
+        a = _polygon_kf(10, points=[[0.0, 0.0], [0.2, 0.0], [0.2, 0.2], [0.0, 0.2]])
+        b = _polygon_kf(20, points=[[0.6, 0.0], [0.8, 0.0], [0.8, 0.2], [0.6, 0.2]])
+        track = _track(a, b)
+        kf, reason = resolve_for_editing(track, 15)
+        assert reason == ResolveReason.INTERPOLATED
+        assert abs(kf.bbox[0] - 0.3) < 0.05
+
+    def test_polygon_gap_over_limit_returns_held(self):
+        a = _polygon_kf(0)
+        b = _polygon_kf(31)
+        track = _track(a, b)
+        kf, reason = resolve_for_editing(track, 15)
+        assert reason == ResolveReason.HELD_FROM_PRIOR
+        assert kf is a
