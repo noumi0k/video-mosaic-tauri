@@ -97,6 +97,8 @@ type MutationResult = {
 const DEFAULT_EXPORT_OPTIONS = {
   mosaic_strength: 12,
   audio_mode: "mux_if_possible" as const,
+  resolution: "source" as string,
+  bitrate_kbps: null as number | null,
 };
 
 function fileNameFromPath(value: string | null | undefined) {
@@ -187,6 +189,8 @@ export function App() {
   const [exportStatus, setExportStatus] = useState<ExportJobStatus | null>(null);
   const [exportCancelling, setExportCancelling] = useState(false);
   const [lastExportOutputPath, setLastExportOutputPath] = useState<string | null>(null);
+  const [exportResolution, setExportResolution] = useState("source");
+  const [exportMosaicStrength, setExportMosaicStrength] = useState(12);
 
   // ジョブ通知の dismiss 管理
   const [dismissedJobIds, setDismissedJobIds] = useState<Set<string>>(new Set());
@@ -670,7 +674,11 @@ export function App() {
       project_path: projectPath,
       output_path: outputPath,
       job_id: jobId,
-      options: DEFAULT_EXPORT_OPTIONS,
+      options: {
+        ...DEFAULT_EXPORT_OPTIONS,
+        mosaic_strength: exportMosaicStrength,
+        resolution: exportResolution,
+      },
     }).then((response) => {
       if (!response.ok) setErrorMessage(prettyError(response.error));
       setActivity(response.ok ? uiText.activity.exportCompleted : uiText.activity.exportFailed);
@@ -1029,6 +1037,12 @@ export function App() {
           <button className="nle-btn" onClick={handleUndo} disabled={!canUndo} title="Undo (Ctrl+Z)">Undo</button>
           <button className="nle-btn" onClick={handleRedo} disabled={!canRedo} title="Redo (Ctrl+Shift+Z)">Redo</button>
           <button className="nle-btn" onClick={() => setDetectModalOpen(true)} disabled={!project || Boolean(activeDetectJob)}>{uiText.actions.detect}</button>
+          <select className="nle-select" value={exportResolution} onChange={(e) => setExportResolution(e.target.value)} title="Export resolution">
+            <option value="source">Source</option>
+            <option value="720p">720p</option>
+            <option value="1080p">1080p</option>
+            <option value="4k">4K</option>
+          </select>
           <button className="nle-btn nle-btn--accent" onClick={() => void handleExport()} disabled={!project || Boolean(activeExportJobId)}>{uiText.actions.export}</button>
         </div>
         <div className="nle-header__spacer" />
