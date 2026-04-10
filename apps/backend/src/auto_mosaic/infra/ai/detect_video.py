@@ -20,6 +20,11 @@ from auto_mosaic.domain.mask_continuity import (
     merge_held_segments,
 )
 from auto_mosaic.domain.project import Keyframe, MaskTrack, ProjectDocument
+from auto_mosaic.domain.track_quality import (
+    MATCH_MAX_FRAME_GAP,
+    filter_ephemeral_tracks,
+    stitch_tracks,
+)
 from auto_mosaic.runtime.paths import ensure_runtime_dirs
 
 
@@ -1023,6 +1028,13 @@ def _sampled_frame_indexes(
     return indexes[:cap]
 
 
+_MATCH_MIN_IOU: float = 0.05
+"""Minimum IoU for a detection to be considered a candidate match."""
+
+_MATCH_MAX_NORM_DISTANCE: float = 1.75
+"""Maximum normalized center distance (distance / max_bbox_dimension)."""
+
+
 def _build_detector_track(index: int) -> MaskTrack:
     return MaskTrack(
         track_id=f"detector-track-{index + 1}",
@@ -1084,7 +1096,7 @@ def _match_detection_to_track(
             continue
 
         frame_gap = max(frame_idx - cursor.last_frame_index, 0)
-        if frame_gap > 12:
+        if frame_gap > MATCH_MAX_FRAME_GAP:
             continue
 
         iou = _bbox_iou(cursor.last_bbox, bbox)
@@ -1092,7 +1104,7 @@ def _match_detection_to_track(
         area_scale = max(cursor.last_bbox[2], bbox[2], cursor.last_bbox[3], bbox[3], 1e-6)
         normalized_distance = distance / area_scale
 
-        if iou < 0.05 and normalized_distance > 1.75:
+        if iou < _MATCH_MIN_IOU and normalized_distance > _MATCH_MAX_NORM_DISTANCE:
             continue
 
         score = (iou * 3.0) - normalized_distance - (frame_gap * 0.04)
@@ -1397,6 +1409,10 @@ def _detect_composite_body(
         for track in ctx.detector_tracks:
             track.keyframes.sort(key=lambda item: item.frame_index)
             merge_held_segments(track)  # W5: normalise adjacent/overlapping same-state segments
+        # Stitch and filter per-backend tracks before merging across backends.
+        ctx.detector_tracks = stitch_tracks(ctx.detector_tracks)
+        ctx.detector_tracks = filter_ephemeral_tracks(ctx.detector_tracks)
+        for track in ctx.detector_tracks:
             new_id = f"{ctx.backend_name}-{len(merged_tracks) + 1}"
             track.track_id = new_id
             track.label = f"{ctx.backend_name} {len(merged_tracks) + 1}"
@@ -1624,6 +1640,10 @@ def detect_project_video(project: ProjectDocument, payload: dict) -> DetectionSu
     for track in detector_tracks:
         track.keyframes.sort(key=lambda item: item.frame_index)
         merge_held_segments(track)  # W5: normalise adjacent/overlapping same-state segments
+
+    # Post-detection track quality: stitch fragments then filter ephemeral.
+    detector_tracks = stitch_tracks(detector_tracks)
+    detector_tracks = filter_ephemeral_tracks(detector_tracks)
 
     report("finalizing", 96.0, "Finalizing detection result", current=analyzed_frames, total=len(sampled_indexes))
 
