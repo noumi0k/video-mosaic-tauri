@@ -3,6 +3,7 @@ import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import { open, save } from "@tauri-apps/plugin-dialog";
 import { CanvasStagePanel } from "./components/CanvasStagePanel";
 import { DetectorSettingsModal } from "./components/DetectorSettingsModal";
+import { ExportSettingsModal, type ExportSettings } from "./components/ExportSettingsModal";
 import { JobPanel } from "./components/JobPanel";
 import { KeyframeDetailPanel } from "./components/KeyframeDetailPanel";
 import { TimelineView } from "./components/TimelineView";
@@ -190,8 +191,13 @@ export function App() {
   const [exportStatus, setExportStatus] = useState<ExportJobStatus | null>(null);
   const [exportCancelling, setExportCancelling] = useState(false);
   const [lastExportOutputPath, setLastExportOutputPath] = useState<string | null>(null);
-  const [exportResolution, setExportResolution] = useState("source");
-  const [exportMosaicStrength, setExportMosaicStrength] = useState(12);
+  const [exportModalOpen, setExportModalOpen] = useState(false);
+  const [exportSettings, setExportSettings] = useState<ExportSettings>({
+    resolution: "source",
+    mosaic_strength: 12,
+    audio_mode: "mux_if_possible",
+    bitrate_kbps: null,
+  });
 
   // In/Out frame markers for range detection
   const [inFrame, setInFrame] = useState<number | null>(null);
@@ -778,7 +784,14 @@ export function App() {
     setActivity(uiText.activity.detectStarted);
   }
 
-  async function handleExport() {
+  function handleExportClick() {
+    if (!project) return;
+    setExportModalOpen(true);
+  }
+
+  async function handleExportWithSettings(settings: ExportSettings) {
+    setExportModalOpen(false);
+    setExportSettings(settings);
     if (!project) return;
     // Pre-export safety check: warn about dangerous frames.
     const dangers = detectDangerousFrames(project);
@@ -828,9 +841,10 @@ export function App() {
       output_path: outputPath,
       job_id: jobId,
       options: {
-        ...DEFAULT_EXPORT_OPTIONS,
-        mosaic_strength: exportMosaicStrength,
-        resolution: exportResolution,
+        mosaic_strength: settings.mosaic_strength,
+        audio_mode: settings.audio_mode,
+        resolution: settings.resolution,
+        bitrate_kbps: settings.bitrate_kbps,
       },
     }).then((response) => {
       if (!response.ok) setErrorMessage(prettyError(response.error));
@@ -1337,13 +1351,7 @@ export function App() {
           <button className="nle-btn" onClick={handleUndo} disabled={!canUndo} title="Undo (Ctrl+Z)">Undo{canUndo ? ` (${history.past.length})` : ""}</button>
           <button className="nle-btn" onClick={handleRedo} disabled={!canRedo} title="Redo (Ctrl+Shift+Z)">Redo{canRedo ? ` (${history.future.length})` : ""}</button>
           <button className="nle-btn" onClick={() => setDetectModalOpen(true)} disabled={!project || Boolean(activeDetectJob)}>{uiText.actions.detect}</button>
-          <select className="nle-select" value={exportResolution} onChange={(e) => setExportResolution(e.target.value)} title="Export resolution">
-            <option value="source">Source</option>
-            <option value="720p">720p</option>
-            <option value="1080p">1080p</option>
-            <option value="4k">4K</option>
-          </select>
-          <button className="nle-btn nle-btn--accent" onClick={() => void handleExport()} disabled={!project || Boolean(activeExportJobId)}>{uiText.actions.export}</button>
+          <button className="nle-btn nle-btn--accent" onClick={handleExportClick} disabled={!project || Boolean(activeExportJobId)}>{uiText.actions.export}</button>
         </div>
         {(inFrame !== null || outFrame !== null) && (
           <div className="nle-header__group" style={{ fontSize: "0.85em", gap: 4 }}>
@@ -1590,6 +1598,13 @@ export function App() {
         onConvertErax={() => void handleConvertErax()}
         onRecheck={() => void runDoctor()}
         onClose={() => setDetectModalOpen(false)}
+      />
+
+      <ExportSettingsModal
+        open={exportModalOpen}
+        onClose={() => setExportModalOpen(false)}
+        onExport={(s) => void handleExportWithSettings(s)}
+        defaultSettings={exportSettings}
       />
 
       <footer className="nle-statusbar">
