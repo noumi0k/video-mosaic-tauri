@@ -340,6 +340,48 @@ class TestDetectGuard:
         assert result["ok"] is False
         assert result["error"]["code"] == "MODEL_BROKEN"
 
+    def test_sha256_mismatch_fails_before_spawn(self, monkeypatch):
+        """A present ONNX file with the wrong digest must not start a worker."""
+        d = _td("guard-sha256")
+        valid = _valid_onnx_bytes(2048)
+        fake_spec = _make_spec(
+            name="320n.onnx",
+            expected_size=len(valid),
+            expected_sha256="0" * 64,
+            valid_magic_bytes=ONNX_MAGIC_BYTES,
+        )
+        monkeypatch.setattr(
+            "auto_mosaic.api.commands.start_detect_job.get_model_spec_map",
+            lambda: {"320n.onnx": fake_spec},
+        )
+
+        result = self._run(d, model_content=valid)
+        assert result["ok"] is False
+        assert result["error"]["code"] == "MODEL_BROKEN"
+
+    def test_composite_requires_selected_optional_backend_before_spawn(self, monkeypatch):
+        """Composite/intercourse needs EraX ONNX even though 320n is the default detector."""
+        d = _td("guard-composite-erax")
+        fake_specs = {
+            "erax_nsfw_yolo11s.onnx": _make_spec(name="erax_nsfw_yolo11s.onnx", valid_magic_bytes=ONNX_MAGIC_BYTES),
+        }
+        monkeypatch.setattr(
+            "auto_mosaic.api.commands.start_detect_job.get_model_spec_map",
+            lambda: fake_specs,
+        )
+
+        result = start_detect_job.run(
+            {
+                "paths": {"model_dir": str(d)},
+                "backend": "composite",
+                "enabled_label_categories": ["intercourse"],
+                "project_path": "/fake/project.json",
+            }
+        )
+        assert result["ok"] is False
+        assert result["error"]["code"] == "MODEL_MISSING"
+        assert result["error"]["details"]["model_name"] == "erax_nsfw_yolo11s.onnx"
+
     def test_valid_model_proceeds_to_spawn(self, monkeypatch):
         """Valid model -> worker spawn attempted.
 

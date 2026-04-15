@@ -1,7 +1,11 @@
 from __future__ import annotations
 
 from auto_mosaic.application.responses import failure, success
-from auto_mosaic.infra.ai.detect_jobs import reconcile_job_state
+from auto_mosaic.infra.ai.detect_ledger import (
+    get_detect_job_ledger,
+    reconcile_single_job,
+    row_to_status,
+)
 
 
 def run(payload: dict) -> dict:
@@ -9,8 +13,9 @@ def run(payload: dict) -> dict:
     if not job_id:
         return failure("get-detect-status", "JOB_ID_REQUIRED", "job_id is required.")
 
-    status = reconcile_job_state(str(job_id))
-    if status is None:
+    ledger = get_detect_job_ledger(payload.get("paths"))
+    row = reconcile_single_job(ledger, str(job_id))
+    if row is None:
         return failure(
             "get-detect-status",
             "DETECT_JOB_NOT_FOUND",
@@ -18,4 +23,4 @@ def run(payload: dict) -> dict:
             {"job_id": str(job_id)},
         )
 
-    return success("get-detect-status", {"job_id": str(job_id), "status": status})
+    return success("get-detect-status", {"job_id": str(job_id), "status": row_to_status(row)})

@@ -139,7 +139,11 @@ _ERAX_DEFAULT_LABELS: list[str] = [
 _ERAX_CATEGORY_LABEL_PATTERNS: dict[str, tuple[str, ...]] = {
     "male_genitalia":   ("male_genitalia", "male genital", "penis"),
     "female_genitalia": ("female_genitalia", "female genital", "vagina", "vulva"),
-    "intercourse":      ("intercourse", "sex", "penetration", "coitus"),
+    # The shipping EraX v1.1 weight uses "make_love" for the intercourse class
+    # (verified 2026-04-11 against erax_nsfw_yolo11s.pt model.names). The other
+    # patterns are kept so a future re-export with different label naming still
+    # resolves cleanly.
+    "intercourse":      ("intercourse", "sex", "penetration", "coitus", "make_love"),
 }
 
 
@@ -270,6 +274,7 @@ class _DetectorContext:
     model_path: Path
     session: Any
     device: str
+    provider_label: str
     input_size: int
     labels: list[str]
     enabled_class_indexes: set[int] | None
@@ -340,6 +345,7 @@ def _build_detector_context(
             },
         )
     session, device = _build_session(model_path, device_pref, vram_saving=vram_saving)
+    provider_label = _session_device_label(session.get_providers())
 
     if backend_name == "erax_v1_1":
         labels = _load_erax_labels(model_dir)
@@ -363,6 +369,7 @@ def _build_detector_context(
         model_path=model_path,
         session=session,
         device=device,
+        provider_label=provider_label,
         input_size=input_size,
         labels=labels,
         enabled_class_indexes=enabled_class_indexes,
@@ -467,7 +474,27 @@ def _preferred_providers() -> tuple[list[str], str]:
     providers = ort.get_available_providers()
     if "CUDAExecutionProvider" in providers:
         return ["CUDAExecutionProvider", "CPUExecutionProvider"], "gpu"
+    # DirectML: Windows GPU acceleration without a full CUDA installation.
+    # Available in onnxruntime >= 1.16 on Windows when the DML runtime is present.
+    if "DmlExecutionProvider" in providers:
+        return ["DmlExecutionProvider", "CPUExecutionProvider"], "gpu"
     return ["CPUExecutionProvider"], "cpu"
+
+
+def _session_device(session_providers: list[str]) -> str:
+    if "CUDAExecutionProvider" in session_providers:
+        return "gpu"
+    if "DmlExecutionProvider" in session_providers:
+        return "gpu"
+    return "cpu"
+
+
+def _session_device_label(session_providers: list[str]) -> str:
+    if "CUDAExecutionProvider" in session_providers:
+        return "GPU/CUDA"
+    if "DmlExecutionProvider" in session_providers:
+        return "GPU/DirectML"
+    return "CPU"
 
 
 def _build_session(
@@ -553,13 +580,12 @@ def _build_session(
                 "model_path": str(model_path),
             },
         )
-    if "CUDAExecutionProvider" not in session_providers:
-        if device_pref == "auto":
-            _log(
-                f"[device] auto mode: CUDAExecutionProvider was preferred but session "
-                f"used {session_providers}; proceeding with CPU (degraded success)"
-            )
-        device = "cpu"
+    device = _session_device(session_providers)
+    if device == "cpu" and device_pref == "auto" and preferred != ["CPUExecutionProvider"]:
+        _log(
+            f"[device] auto mode: preferred providers {preferred} but session "
+            f"used {session_providers}; proceeding with CPU (degraded success)"
+        )
     return session, device
 
 
@@ -1371,6 +1397,9 @@ def _detect_composite_body(
             raise
         contexts.append(ctx)
 
+    device_labels = sorted({ctx.provider_label for ctx in contexts})
+    composite_device_label = "+".join(device_labels) if device_labels else "CPU"
+
     report("probing_video", 18.0, "Opening source video")
     capture = cv2.VideoCapture(project.video.source_path)
     if not capture.isOpened():
@@ -1401,7 +1430,7 @@ def _detect_composite_body(
             report(
                 "running_inference",
                 32.0 + ((pos / max(total_samples, 1)) * 55.0),
-                "Running composite inference",
+                f"Running composite inference ({composite_device_label})",
                 current=pos,
                 total=total_samples,
             )
@@ -1549,6 +1578,9 @@ def detect_project_video(project: ProjectDocument, payload: dict) -> DetectionSu
         for key, value in enrichment.items():
             exc.details.setdefault(key, value)
         raise
+    device_label = _session_device_label(session.get_providers())
+    _log(f"[device] session ready: device={device} ({device_label})")
+    report("loading_model", 18.0, f"モデル読み込み完了 ({device_label})")
 
     # inference_resolution: payload overrides model default
     default_input_size = 640 if "640" in model_name else 320
@@ -1622,7 +1654,7 @@ def detect_project_video(project: ProjectDocument, payload: dict) -> DetectionSu
                 report(
                     "running_inference",
                     35.0 + ((processed_samples / max(total_samples, 1)) * 50.0),
-                    "Running detector inference",
+                    f"推論実行中 ({device_label})",
                     current=processed_samples,
                     total=total_samples,
                 )
@@ -1637,7 +1669,7 @@ def detect_project_video(project: ProjectDocument, payload: dict) -> DetectionSu
             report(
                 "running_inference",
                 35.0 + ((processed_samples / max(total_samples, 1)) * 50.0),
-                "Running detector inference",
+                f"推論実行中 ({device_label})",
                 current=processed_samples,
                 total=total_samples,
             )

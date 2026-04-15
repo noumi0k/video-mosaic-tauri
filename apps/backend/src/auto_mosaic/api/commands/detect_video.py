@@ -159,6 +159,11 @@ def execute_detect(payload: dict) -> dict:
             start_frame=int(start_frame),
             end_frame=int(end_frame),
         )
+    elif payload.get("overwrite_manual_tracks"):
+        # UI が「全上書き」を選んだ場合: 手動保護をスキップして全置換する。
+        # replace_detector_tracks は user_edited / user_locked トラックを保持するが、
+        # ここではユーザーが明示的に全上書きを選択しているため保護しない。
+        project.tracks = list(detection.tracks)
     else:
         project.replace_detector_tracks(detection.tracks)
 

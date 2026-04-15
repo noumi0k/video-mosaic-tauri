@@ -1,7 +1,11 @@
 from __future__ import annotations
 
 from auto_mosaic.application.responses import success
-from auto_mosaic.infra.ai.detect_jobs import DEFAULT_RECENT_JOB_LIMIT, list_recent_jobs
+from auto_mosaic.infra.ai.detect_ledger import (
+    DEFAULT_RECENT_JOB_LIMIT,
+    get_detect_job_ledger,
+    list_recent_jobs,
+)
 
 
 def run(payload: dict) -> dict:
@@ -11,4 +15,6 @@ def run(payload: dict) -> dict:
     except (TypeError, ValueError):
         parsed_limit = DEFAULT_RECENT_JOB_LIMIT
     parsed_limit = max(1, min(parsed_limit, 50))
-    return success("list-detect-jobs", list_recent_jobs(limit=parsed_limit, recover=True))
+
+    ledger = get_detect_job_ledger(payload.get("paths"))
+    return success("list-detect-jobs", list_recent_jobs(ledger, limit=parsed_limit))

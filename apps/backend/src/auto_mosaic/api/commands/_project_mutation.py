@@ -10,86 +10,93 @@ from auto_mosaic.runtime.file_io import atomic_write_text
 
 def load_project_for_mutation(command: str, payload: dict) -> tuple[ProjectDocument | None, Path | None, dict | None]:
     project_path = payload.get("project_path")
-    if not project_path:
-        return None, None, failure(command, "PROJECT_PATH_REQUIRED", "project_path is required.")
 
-    path = Path(project_path)
-    if not path.exists():
-        return (
-            None,
-            None,
-            failure(
-                command,
-                "PROJECT_NOT_FOUND",
-                "Project file does not exist.",
-                {"project_path": str(path)},
-            ),
-        )
+    if project_path:
+        # 保存済みプロジェクト: ファイルから読み込む
+        path = Path(project_path)
+        if not path.exists():
+            return (
+                None,
+                None,
+                failure(
+                    command,
+                    "PROJECT_NOT_FOUND",
+                    "Project file does not exist.",
+                    {"project_path": str(path)},
+                ),
+            )
+
+        try:
+            raw = json.loads(path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError as exc:
+            return (
+                None,
+                None,
+                failure(
+                    command,
+                    "PROJECT_JSON_INVALID",
+                    "Project JSON is invalid.",
+                    {"project_path": str(path), "reason": str(exc)},
+                ),
+            )
+
+        try:
+            project = ProjectDocument.from_payload({**raw, "project_path": str(path)})
+        except ProjectMigrationError as exc:
+            return (
+                None,
+                None,
+                failure(
+                    command,
+                    exc.code,
+                    exc.message,
+                    {"project_path": str(path), **exc.details},
+                ),
+            )
+        except (ValueError, KeyError) as exc:
+            return (
+                None,
+                None,
+                failure(
+                    command,
+                    "PROJECT_SCHEMA_INVALID",
+                    "Project JSON is invalid.",
+                    {"project_path": str(path), "reason": str(exc)},
+                ),
+            )
+
+        issues = project.validate()
+        if issues:
+            return (
+                None,
+                None,
+                failure(
+                    command,
+                    "PROJECT_SCHEMA_INVALID",
+                    "Project JSON failed validation.",
+                    {"project_path": str(path), "issues": issues},
+                ),
+            )
+
+        return project, path, None
+
+    # 未保存プロジェクト: frontend から渡されたインライン project を使う (path=None)
+    inline = payload.get("project")
+    if not inline:
+        return None, None, failure(command, "PROJECT_PATH_REQUIRED", "project_path or project is required.")
 
     try:
-        raw = json.loads(path.read_text(encoding="utf-8"))
-    except json.JSONDecodeError as exc:
-        return (
-            None,
-            None,
-            failure(
-                command,
-                "PROJECT_JSON_INVALID",
-                "Project JSON is invalid.",
-                {"project_path": str(path), "reason": str(exc)},
-            ),
-        )
-
-    try:
-        project = ProjectDocument.from_payload({**raw, "project_path": str(path)})
+        project = ProjectDocument.from_payload(inline)
     except ProjectMigrationError as exc:
-        return (
-            None,
-            None,
-            failure(
-                command,
-                exc.code,
-                exc.message,
-                {"project_path": str(path), **exc.details},
-            ),
-        )
-    except ValueError as exc:
-        return (
-            None,
-            None,
-            failure(
-                command,
-                "PROJECT_SCHEMA_INVALID",
-                "Project JSON contains invalid values.",
-                {"project_path": str(path), "reason": str(exc)},
-            ),
-        )
-    except KeyError as exc:
-        return (
-            None,
-            None,
-            failure(
-                command,
-                "PROJECT_SCHEMA_INVALID",
-                "Project JSON is missing required fields.",
-                {"project_path": str(path), "missing_field": str(exc)},
-            ),
-        )
+        return None, None, failure(command, exc.code, exc.message, exc.details)
+    except (ValueError, KeyError) as exc:
+        return None, None, failure(command, "PROJECT_SCHEMA_INVALID", str(exc), {})
 
     issues = project.validate()
     if issues:
-        return (
-            None,
-            None,
-            failure(
-                command,
-                "PROJECT_SCHEMA_INVALID",
-                "Project JSON failed validation.",
-                {"project_path": str(path), "issues": issues},
-            ),
-        )
+        return None, None, failure(command, "PROJECT_SCHEMA_INVALID", "Project JSON failed validation.", {"issues": issues})
 
-    return project, path, None
+    return project, None, None
 
 
 def find_track(project: ProjectDocument, track_id: str):
@@ -100,22 +107,25 @@ def find_keyframe(track, frame_index: int):
     return next((item for item in track.keyframes if item.frame_index == frame_index), None)
 
 
-def persist_project(command: str, project: ProjectDocument, path: Path, selection: dict | None = None):
+def persist_project(command: str, project: ProjectDocument, path: Path | None, selection: dict | None = None):
     project.apply_domain_rules()
-    project.project_path = str(path)
-    try:
-        atomic_write_text(path, project.to_json(), encoding="utf-8")
-    except OSError as exc:
-        return failure(
-            command,
-            "PROJECT_SAVE_FAILED",
-            "Could not save the project file.",
-            {"project_path": str(path), "reason": str(exc)},
-        )
+    if path is not None:
+        # 保存済みプロジェクト: ディスクに書き込む
+        project.project_path = str(path)
+        try:
+            atomic_write_text(path, project.to_json(), encoding="utf-8")
+        except OSError as exc:
+            return failure(
+                command,
+                "PROJECT_SAVE_FAILED",
+                "Could not save the project file.",
+                {"project_path": str(path), "reason": str(exc)},
+            )
+    # path=None の場合はディスク書き込みをスキップ (未保存 in-memory 編集)
     return success(
         command,
         {
-            "project_path": str(path),
+            "project_path": project.project_path,
             "project": project.to_dict(),
             "read_model": project.build_read_model(),
             "selection": selection

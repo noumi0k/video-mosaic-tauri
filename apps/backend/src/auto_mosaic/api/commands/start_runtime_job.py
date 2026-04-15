@@ -15,7 +15,7 @@ from auto_mosaic.infra.runtime_jobs import (
     write_status,
 )
 
-SUPPORTED_JOB_KINDS = {"setup_environment", "fetch_models", "open_video"}
+SUPPORTED_JOB_KINDS = {"setup_environment", "fetch_models", "open_video", "setup_erax_convert"}
 
 
 def _backend_root() -> Path:
@@ -68,7 +68,7 @@ def run(payload: dict) -> dict:
         return failure(
             "start-runtime-job",
             "UNSUPPORTED_JOB_KIND",
-            "job_kind must be setup_environment, fetch_models, or open_video.",
+            "job_kind must be setup_environment, fetch_models, open_video, or setup_erax_convert.",
             {"job_kind": job_kind},
         )
 
@@ -118,4 +118,3 @@ def run(payload: dict) -> dict:
         )
 
     return success("start-runtime-job", {"job_id": job_id, "status": queued_status})
-

@@ -45,7 +45,7 @@ from auto_mosaic.api.commands import run_runtime_job
 from auto_mosaic.domain.project import CURRENT_PROJECT_SCHEMA_VERSION, ProjectDocument
 from auto_mosaic.domain.project import Keyframe, MaskTrack
 from auto_mosaic.infra.ai import detect_video as detect_video_infra
-from auto_mosaic.infra.ai.detect_jobs import read_status, write_status
+from auto_mosaic.infra.ai.detect_ledger import get_detect_job_ledger
 from auto_mosaic.infra.video.export import export_project_video
 from auto_mosaic.infra.video import export_jobs
 from auto_mosaic.runtime.external_tools import resolve_external_tool
@@ -355,6 +355,18 @@ def test_runtime_open_video_job_round_trips_japanese_path(monkeypatch):
     result_response = get_runtime_job_result.run({"job_id": job_id})
     assert result_response["ok"] is True
     assert result_response["data"]["result"]["data"]["video"]["source_path"] == str(video_path)
+
+
+def test_start_runtime_accepts_erax_convert_job(monkeypatch):
+    def fake_spawn(job_id: str, payload: dict) -> int:
+        assert payload["job_kind"] == "setup_erax_convert"
+        return 12345
+
+    monkeypatch.setattr("auto_mosaic.api.commands.start_runtime_job._spawn_runtime_worker", fake_spawn)
+    started = start_runtime_job.run({"job_kind": "setup_erax_convert"})
+
+    assert started["ok"] is True
+    assert started["data"]["status"]["job_kind"] == "setup_erax_convert"
 
 
 def test_fetch_models_reports_non_downloadable_optional_model():
@@ -858,7 +870,6 @@ def test_detect_job_cancelled_transition(monkeypatch):
         raise AssertionError("cancel was never requested")
 
     monkeypatch.setattr("auto_mosaic.api.commands.detect_video.detect_project_video", fake_detect)
-    monkeypatch.setattr("auto_mosaic.infra.ai.detect_jobs._is_worker_alive", lambda _pid: True)
 
     workers: list[threading.Thread] = []
 
@@ -878,13 +889,14 @@ def test_detect_job_cancelled_transition(monkeypatch):
     job_id = start_response["data"]["job_id"]
 
     for _ in range(20):
-        status = read_status(job_id)
-        if status and status["state"] == "running":
+        status_poll = get_detect_status.run({"job_id": job_id})
+        if status_poll["ok"] and status_poll["data"]["status"]["state"] == "running":
             break
         time.sleep(0.01)
 
     cancel_response = cancel_detect_job.run({"job_id": job_id})
     assert cancel_response["ok"] is True
+    assert cancel_response["data"]["cancel_requested"] is True
 
     final_status = None
     for _ in range(40):
@@ -902,25 +914,43 @@ def test_detect_job_cancelled_transition(monkeypatch):
         worker.join(timeout=1.0)
 
 
-def test_list_detect_jobs_marks_dead_running_job_interrupted(monkeypatch):
-    jobs_root = TEST_ROOT / "detect-job-list-runtime"
-    monkeypatch.setattr("auto_mosaic.infra.ai.detect_jobs._jobs_root", lambda: jobs_root)
-    monkeypatch.setattr("auto_mosaic.infra.ai.detect_jobs._is_worker_alive", lambda _pid: False)
+def _age_ledger_heartbeat(ledger_db_path: Path, job_id: str, seconds_in_past: int) -> None:
+    """Rewrite a job's heartbeat_at to simulate a stale worker.
 
+    Used by ledger-level reconciliation tests: the staleness cutoff is computed
+    from `datetime.now(UTC) - timeout`, so we backdate heartbeat_at directly
+    rather than sleep for the full timeout in tests.
+    """
+    import sqlite3 as _sqlite3
+    from datetime import UTC as _UTC, datetime as _datetime, timedelta as _timedelta
+
+    past = _datetime.now(_UTC) - _timedelta(seconds=seconds_in_past)
+    past_iso = past.isoformat().replace("+00:00", "Z")
+    conn = _sqlite3.connect(str(ledger_db_path))
+    try:
+        conn.execute(
+            "UPDATE jobs SET heartbeat_at = ? WHERE job_id = ?",
+            (past_iso, job_id),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def test_list_detect_jobs_marks_dead_running_job_interrupted(tmp_path, monkeypatch):
+    monkeypatch.setenv("AUTO_MOSAIC_DATA_DIR", str(tmp_path))
+    ledger = get_detect_job_ledger()
     job_id = "detect-dead-running"
-    write_status(
+    ledger.create_job(job_id, stage="running_inference", message="Running detector inference")
+    ledger.update_progress(
         job_id,
-        {
-            "job_id": job_id,
-            "state": "running",
-            "stage": "running_inference",
-            "percent": 42.0,
-            "message": "Running detector inference",
-            "current": 21,
-            "total": 50,
-            "worker_pid": 999999,
-        },
+        state="running",
+        progress_percent=42.0,
+        current=21,
+        total=50,
+        worker_pid=999999,
     )
+    _age_ledger_heartbeat(ledger.db_path, job_id, seconds_in_past=120)
 
     response = list_detect_jobs.run({"limit": 5})
     assert response["ok"] is True
@@ -931,28 +961,16 @@ def test_list_detect_jobs_marks_dead_running_job_interrupted(monkeypatch):
     assert response["data"]["recovered_interrupted"] == 1
 
 
-def test_list_detect_jobs_promotes_dead_running_job_when_result_exists(monkeypatch):
-    jobs_root = TEST_ROOT / "detect-job-result-reconcile-runtime"
-    monkeypatch.setattr("auto_mosaic.infra.ai.detect_jobs._jobs_root", lambda: jobs_root)
-    monkeypatch.setattr("auto_mosaic.infra.ai.detect_jobs._is_worker_alive", lambda _pid: False)
-
-    job_id = "detect-dead-running-with-result"
-    write_status(
-        job_id,
-        {
-            "job_id": job_id,
-            "state": "running",
-            "stage": "running_inference",
-            "percent": 42.0,
-            "message": "Running detector inference",
-            "current": 21,
-            "total": 50,
-            "worker_pid": 999999,
-        },
-    )
-    from auto_mosaic.infra.ai.detect_jobs import write_result
-
-    write_result(
+def test_list_detect_jobs_reports_succeeded_job(tmp_path, monkeypatch):
+    # With the SQLite ledger, state=succeeded and result_json are written in the
+    # same transaction; there is no longer a race where result exists but state
+    # lags behind. This test confirms a succeeded row is surfaced correctly.
+    monkeypatch.setenv("AUTO_MOSAIC_DATA_DIR", str(tmp_path))
+    ledger = get_detect_job_ledger()
+    job_id = "detect-succeeded"
+    ledger.create_job(job_id, stage="running_inference", message="Running detector inference")
+    ledger.update_progress(job_id, state="running", progress_percent=80.0, current=40, total=50)
+    ledger.mark_succeeded(
         job_id,
         {
             "ok": True,
@@ -968,7 +986,6 @@ def test_list_detect_jobs_promotes_dead_running_job_when_result_exists(monkeypat
     job = response["data"]["jobs"][0]
     assert job["job_id"] == job_id
     assert job["state"] == "succeeded"
-    assert job["stage"] == "finalizing"
     assert job["percent"] == 100.0
     assert job["result_available"] is True
     assert job["has_result"] is True
@@ -976,23 +993,18 @@ def test_list_detect_jobs_promotes_dead_running_job_when_result_exists(monkeypat
     assert response["data"]["recovered_interrupted"] == 0
 
 
-def test_cleanup_detect_jobs_prunes_old_terminal_jobs(monkeypatch):
-    jobs_root = TEST_ROOT / "detect-job-cleanup-runtime"
-    monkeypatch.setattr("auto_mosaic.infra.ai.detect_jobs._jobs_root", lambda: jobs_root)
+def test_cleanup_detect_jobs_prunes_old_terminal_jobs(tmp_path, monkeypatch):
+    monkeypatch.setenv("AUTO_MOSAIC_DATA_DIR", str(tmp_path))
+    ledger = get_detect_job_ledger()
 
     for index in range(4):
         job_id = f"detect-old-{index}"
-        write_status(
+        ledger.create_job(job_id, message=f"done-{index}")
+        ledger.mark_succeeded(
             job_id,
-            {
-                "job_id": job_id,
-                "state": "succeeded",
-                "stage": "finalizing",
-                "percent": 100.0,
-                "message": f"done-{index}",
-                "updated_at": f"2026-01-0{index + 1}T00:00:00Z",
-            },
+            {"ok": True, "command": "detect-video", "data": {}, "error": None, "warnings": []},
         )
+        time.sleep(0.01)  # ensure updated_at is strictly ordered
 
     cleanup_response = cleanup_detect_jobs.run({"retain_limit": 2})
     assert cleanup_response["ok"] is True
@@ -1003,17 +1015,15 @@ def test_cleanup_detect_jobs_prunes_old_terminal_jobs(monkeypatch):
     assert [job["job_id"] for job in remaining["data"]["jobs"]] == ["detect-old-3", "detect-old-2"]
 
 
-def test_list_detect_jobs_ignores_broken_directory(monkeypatch):
-    jobs_root = TEST_ROOT / "detect-job-broken-runtime"
-    monkeypatch.setattr("auto_mosaic.infra.ai.detect_jobs._jobs_root", lambda: jobs_root)
-    broken_dir = jobs_root / "detect-broken"
-    broken_dir.mkdir(parents=True, exist_ok=True)
-    (broken_dir / "status.json").write_text("{not json", encoding="utf-8")
+def test_list_detect_jobs_empty_ledger_returns_no_broken_ids(tmp_path, monkeypatch):
+    # Canonical ledger rows replace on-disk status.json; there is no "broken
+    # directory" concept anymore. broken_job_ids is always [].
+    monkeypatch.setenv("AUTO_MOSAIC_DATA_DIR", str(tmp_path))
 
     response = list_detect_jobs.run({"limit": 5})
     assert response["ok"] is True
     assert response["data"]["jobs"] == []
-    assert response["data"]["broken_job_ids"] == ["detect-broken"]
+    assert response["data"]["broken_job_ids"] == []
 
 
 def test_export_job_state_uses_runtime_data_dir(monkeypatch):
@@ -2508,4 +2518,108 @@ def test_create_keyframe_rejects_invalid_polygon_points():
     )
     assert response["ok"] is False
     assert response["error"]["code"] == "INVALID_KEYFRAME_PAYLOAD"
+
+
+def test_update_keyframe_inline_project_no_disk_write():
+    """未保存プロジェクト (project_path なし) でも update-keyframe が動作し、ディスクに書かない。"""
+    created = create_project.run(
+        {
+            "name": "InlineEditTest",
+            "tracks": [
+                {
+                    "track_id": "track-a",
+                    "label": "person",
+                    "state": "active",
+                    "source": "manual",
+                    "visible": True,
+                    "keyframes": [
+                        {
+                            "frame_index": 5,
+                            "shape_type": "polygon",
+                            "points": [[0.1, 0.1], [0.3, 0.1], [0.3, 0.3]],
+                            "bbox": [0.1, 0.1, 0.2, 0.2],
+                            "confidence": 1.0,
+                            "source": "manual",
+                            "rotation": 0.0,
+                            "opacity": 1.0,
+                            "expand_px": None,
+                            "feather": None,
+                            "is_locked": False,
+                        }
+                    ],
+                }
+            ],
+        }
+    )
+    assert created["ok"] is True
+    inline_project = created["data"]["project"]
+    # project_path なし → inline project を渡す
+    response = update_keyframe.run(
+        {
+            "project": inline_project,
+            "track_id": "track-a",
+            "frame_index": 5,
+            "patch": {
+                "points": [[0.2, 0.2], [0.4, 0.2], [0.4, 0.4]],
+            },
+        }
+    )
+    assert response["ok"] is True, response
+    assert response["data"]["selection"] == {"track_id": "track-a", "frame_index": 5}
+    # project_path はインライン時も None のまま返る
+    assert response["data"]["project_path"] is None
+    updated_kf = response["data"]["project"]["tracks"][0]["keyframes"][0]
+    assert updated_kf["points"] == [[0.2, 0.2], [0.4, 0.2], [0.4, 0.4]]
+    assert updated_kf["source"] == "manual"
+
+
+def test_create_keyframe_inline_project_no_disk_write():
+    """未保存プロジェクト (project_path なし) でも create-keyframe が動作し、ディスクに書かない。"""
+    created = create_project.run(
+        {
+            "name": "InlineCreateTest",
+            "tracks": [
+                {
+                    "track_id": "track-b",
+                    "label": "face",
+                    "state": "active",
+                    "source": "manual",
+                    "visible": True,
+                    "keyframes": [
+                        {
+                            "frame_index": 1,
+                            "shape_type": "polygon",
+                            "points": [[0.1, 0.1], [0.2, 0.1], [0.2, 0.2]],
+                            "bbox": [0.1, 0.1, 0.1, 0.1],
+                            "confidence": 1.0,
+                            "source": "manual",
+                            "rotation": 0.0,
+                            "opacity": 1.0,
+                            "expand_px": None,
+                            "feather": None,
+                            "is_locked": False,
+                        }
+                    ],
+                }
+            ],
+        }
+    )
+    assert created["ok"] is True
+    inline_project = created["data"]["project"]
+    response = create_keyframe.run(
+        {
+            "project": inline_project,
+            "track_id": "track-b",
+            "frame_index": 10,
+            "shape_type": "polygon",
+            "points": [[0.5, 0.5], [0.6, 0.5], [0.6, 0.6]],
+            "source": "manual",
+        }
+    )
+    assert response["ok"] is True, response
+    assert response["data"]["selection"] == {"track_id": "track-b", "frame_index": 10}
+    assert response["data"]["project_path"] is None
+    kfs = response["data"]["project"]["tracks"][0]["keyframes"]
+    assert len(kfs) == 2
+    assert kfs[1]["frame_index"] == 10
 
