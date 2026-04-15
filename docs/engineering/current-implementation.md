@@ -186,6 +186,9 @@ Cancel は request-based。
 
 実装済み / 未実装の正本は [../project/unimplemented-features.md](../project/unimplemented-features.md)。
 
+安定化フェーズ完了後の開発ロードマップは [../project/pyside6-editing-experience-parity-checklist.md](../project/pyside6-editing-experience-parity-checklist.md) を中核にする。
+PySide6版のUI構成、ボタン配置、メニュー構成を確認する場合は [../project/pyside6-ui-structure-reference.md](../project/pyside6-ui-structure-reference.md) を参照する。
+
 大枠では、P0/P1 は完了扱い。
 現在残っている大きな項目は次。
 
@@ -198,7 +201,13 @@ Cancel は request-based。
 - 正式 installer / updater
 - crash recovery
 
-## 13. 古い資料の扱い
+## 13. 計画資料と古い資料の扱い
+
+安定化フェーズ完了後の新規機能計画では、次の文書を中核資料として扱う。
+
+- [../project/README.md](../project/README.md): Project ドキュメントの入口
+- [../project/pyside6-editing-experience-parity-checklist.md](../project/pyside6-editing-experience-parity-checklist.md): 安定化後の主ロードマップ
+- [../project/pyside6-ui-structure-reference.md](../project/pyside6-ui-structure-reference.md): PySide6 UI 参照資料
 
 次の文書は有用だが正本ではない。
 

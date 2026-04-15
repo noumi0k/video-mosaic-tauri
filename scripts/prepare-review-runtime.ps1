@@ -240,6 +240,65 @@ if (Test-Path (Join-Path $backendRoot "vendor")) {
     Copy-Item -LiteralPath $_.FullName -Destination (Join-Path $backendTarget "vendor") -Recurse -Force
   }
 }
+
+# ---------------------------------------------------------------------------
+# EraX PT -> ONNX 事前変換 (A 案 / 2026-04-11)
+#
+# bundled review-runtime には ultralytics を恒常的に同梱しないため、
+# .pt から .onnx を生成するための ultralytics 実行は prep 時に 1 度だけ行う。
+# workspace の models/ に .onnx が生成されたあとは models コピーで bundled
+# 配下にも自動的に入る。.onnx が既にあればスキップする (idempotent)。
+#
+# ※ 将来 EraX ONNX をホスト経由で配布する案 (model_catalog 化) に切り替わる
+#    場合、このブロックごと削除可能。
+# ---------------------------------------------------------------------------
+$eraxPt = Join-Path $modelsRoot "erax_nsfw_yolo11s.pt"
+$eraxOnnx = Join-Path $modelsRoot "erax_nsfw_yolo11s.onnx"
+$eraxLabels = Join-Path $modelsRoot "erax_nsfw_yolo11s.labels.json"
+if ((Test-Path -LiteralPath $eraxPt) -and -not (Test-Path -LiteralPath $eraxOnnx)) {
+  Write-Host "EraX: pre-converting .pt -> .onnx (one-time, ~30s)..."
+  $bundledPython = Join-Path $pythonTarget "python.exe"
+  if (-not (Test-Path -LiteralPath $bundledPython)) {
+    throw "EraX pre-conversion needs the bundled python at $bundledPython, which was not produced by the earlier copy step."
+  }
+
+  & $bundledPython -m pip install --quiet ultralytics
+  if ($LASTEXITCODE -ne 0) {
+    throw "EraX pre-conversion: pip install ultralytics failed (exit $LASTEXITCODE)."
+  }
+
+  $convertCode = @"
+from pathlib import Path
+from ultralytics import YOLO
+pt = Path(r'$eraxPt')
+model = YOLO(str(pt))
+exported = model.export(format='onnx', imgsz=640)
+exported_path = Path(str(exported))
+if not exported_path.exists():
+    raise SystemExit(f'export reported success but {exported_path} is missing')
+print(f'EraX: wrote {exported_path} ({exported_path.stat().st_size} bytes)')
+names = getattr(model, 'names', None) or getattr(model.model, 'names', None) or {}
+import json
+labels_target = Path(r'$eraxLabels')
+labels_target.write_text(json.dumps({'labels': [names[i] for i in sorted(names)]}, indent=2), encoding='utf-8')
+print(f'EraX: wrote labels sidecar to {labels_target}')
+"@
+  & $bundledPython -c $convertCode
+  if ($LASTEXITCODE -ne 0) {
+    throw "EraX pre-conversion: ultralytics ONNX export failed (exit $LASTEXITCODE)."
+  }
+  if (-not (Test-Path -LiteralPath $eraxOnnx)) {
+    throw "EraX pre-conversion: $eraxOnnx not present after export."
+  }
+  Write-Host "  EraX ONNX ready at $eraxOnnx"
+}
+elseif (Test-Path -LiteralPath $eraxOnnx) {
+  Write-Host "EraX: .onnx already present, skipping pre-conversion."
+}
+else {
+  Write-Host "EraX: .pt not found at $eraxPt, skipping pre-conversion."
+}
+
 Get-ChildItem -LiteralPath $modelsRoot -Force | ForEach-Object {
   Copy-Item -LiteralPath $_.FullName -Destination $modelsTarget -Recurse -Force
 }

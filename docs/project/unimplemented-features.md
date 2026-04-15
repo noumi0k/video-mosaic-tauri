@@ -1,9 +1,11 @@
 # 未実装機能一覧
 
-最終更新: 2026-04-11
+最終更新: 2026-04-15 (Phase 1 完了 / Phase 2 一部実装済み)
 
 このファイルは、実装済み / 未実装 backlog の正本です。
 現行実装の責務境界と不変条件は [../engineering/current-implementation.md](../engineering/current-implementation.md) を参照してください。
+安定化フェーズ完了後の開発方針とフェーズ票は [pyside6-editing-experience-parity-checklist.md](./pyside6-editing-experience-parity-checklist.md) を中核にします。
+PySide6版のUI構成、ボタン配置、メニュー構成を確認する場合は [pyside6-ui-structure-reference.md](./pyside6-ui-structure-reference.md) を参照してください。
 
 ## 1. 実装済み (今回の移行作業で完了)
 
@@ -53,22 +55,43 @@
 - [x] doctor / model integrity / review package
 - [x] 再生同期 (video ↔ currentFrame 双方向)
 
+### 1.6 Phase 1 Stability Gate (2026-04-15 完了)
+- [x] Detect Job Ledger (SQLite canonical state): `job-ledger-migration-plan.md` 全実行
+- [x] `get-detect-status` / `get-detect-result` が ledger state を正とする
+- [x] frontend の result_available / has_result 推論と grace period polling を削除
+- [x] Job Panel の detect cancel ボタン復旧 (nle-btn--cancel スタイル付き)
+- [x] メインウィンドウ終了時に backend worker / child process を自動キャンセル (onCloseRequested)
+- [x] AI 自動検出の GPU provider 自動選択 (CUDA → DirectML → CPU fallback)
+- [x] GPU/CPU 利用状況を detect job 進捗メッセージで表示
+- [x] detect stage ラベルを日本語化 (uiText.jobStages 追加)
+
+### 1.7 Phase 2 Review Workflow Gap (2026-04-15 一部実装)
+- [x] 全体検出前の上書き確認モーダル（手動保護 / 全上書き / キャンセル の3択）
+- [x] backend: `overwrite_manual_tracks` フラグで全上書きを選択可能
+- [x] danger warning 確認状態を App.tsx に lift up (confirmedDangerFrames)
+- [x] danger warning 確認済み行をグレー表示・左ボーダー色変更
+- [x] timeline danger marker: 確認済みをグレーアウト表示
+
 ## 2. 未実装 (P2: 中優先)
 
-### 2.1 オニオンスキン
+### 2.1 Review Workflow (残り)
+- [ ] export 前の danger warning 確認状態チェック（全確認済みでない場合の警告改善）
+- [ ] recovery の file-backed 化（localStorage 依存から backend ファイルへ）
+
+### 2.2 オニオンスキン
 - [ ] 前後フレームの keyframe shape を半透明で重ねて表示
 - [ ] toggle UI (CanvasStagePanel)
 
-### 2.2 GPU エンコーダ選択
+### 2.3 GPU エンコーダ選択
 - [ ] h264_nvenc / h264_qsv / h264_amf の検出と選択
 - [ ] GPU エンコード失敗時の CPU フォールバック
 - [ ] UI: GPU toggle
 
-### 2.3 Export キュー
+### 2.4 Export キュー
 - [ ] 複数 export ジョブの逐次実行
 - [ ] キュー永続化と recovery
 
-### 2.4 E2E テスト
+### 2.5 E2E テスト
 - [ ] canvas drag ベースの実操作テスト
 - [ ] review package 起動後の一連フローテスト
 
@@ -99,5 +122,6 @@
 |--------|------|------|
 | P0 | **全完了** | Persistent mask track, 検出外編集, continuity/fallback, manual anchor 継承 |
 | P1 | **全完了** | Timeline zoom, export parity, progress UX, keyboard shortcuts, autosave, range detect |
-| P2 | 残4件 | オニオンスキン, GPU エンコーダ, export キュー, E2E テスト |
-| P3 | 残4件 | 教師データ, 再学習, installer, crash recovery |
+| P1+ | **全完了** | Phase 1 Stability Gate (Ledger, cancel, shutdown, GPU/CPU display) |
+| P2 | 残6領域 | Review Workflow 残り, オニオンスキン, GPU エンコーダ, export キュー, E2E テスト, crash recovery |
+| P3 | 残3件 | 教師データ, 再学習, installer |

@@ -12,6 +12,7 @@ Auto Mosaic のドキュメント入口です。
 
 まず人間向けの全体像を読むなら [human/product-spec.md](./human/product-spec.md)。
 実装作業に入るなら [engineering/current-implementation.md](./engineering/current-implementation.md) を正本として読みます。
+安定化フェーズ完了後の新規開発方針は [project/README.md](./project/README.md) を入口にし、PySide6 同等編集体験チェックリストを中核ロードマップとして扱います。
 
 ---
 
@@ -43,7 +44,10 @@ Auto Mosaic のドキュメント入口です。
 
 | ファイル | 内容 |
 |----------|------|
+| [README.md](./project/README.md) | Project ドキュメントの入口。安定化後の開発中核資料への読み順 |
 | [unimplemented-features.md](./project/unimplemented-features.md) | 実装済み機能と未実装機能の一覧 |
+| [pyside6-editing-experience-parity-checklist.md](./project/pyside6-editing-experience-parity-checklist.md) | 安定化後の主ロードマップ。PySide6 同等編集体験の機能チェックリストと開発フェーズ票 |
+| [pyside6-ui-structure-reference.md](./project/pyside6-ui-structure-reference.md) | PySide6 版 UI 構成、ボタン配置、メニュー構成の参照資料 |
 | [ai-handoff.md](./project/ai-handoff.md) | 直近作業の handoff log |
 | [pyside6-remaining-tasks.md](./project/pyside6-remaining-tasks.md) | PySide6 版との比較履歴 |
 | [未実装機能一覧.md](./project/未実装機能一覧.md) | `unimplemented-features.md` への日本語ショートカット |
