@@ -1,8 +1,10 @@
-import { useState } from "react";
 import type { DangerousFrame } from "../dangerousFrames";
 
-type DangerWarningsPanelProps = {
+export type DangerWarningsPanelProps = {
   warnings: DangerousFrame[];
+  /** key = `${trackId}-${frameIndex}` */
+  confirmedKeys: Set<string>;
+  onToggleConfirmed: (key: string) => void;
   onSeekFrame: (frame: number) => void;
 };
 
@@ -18,34 +20,36 @@ function reasonColor(reason: string): string {
   return REASON_COLORS.confidence!;
 }
 
-export function DangerWarningsPanel({ warnings, onSeekFrame }: DangerWarningsPanelProps) {
-  const [collapsed, setCollapsed] = useState(false);
-  const [confirmed, setConfirmed] = useState<Set<number>>(new Set());
+function warningKey(w: DangerousFrame): string {
+  return `${w.trackId}-${w.frameIndex}`;
+}
 
+export function DangerWarningsPanel({ warnings, confirmedKeys, onToggleConfirmed, onSeekFrame }: DangerWarningsPanelProps) {
   if (!warnings.length) return null;
 
-  const unconfirmedCount = warnings.filter((_, i) => !confirmed.has(i)).length;
+  const unconfirmedCount = warnings.filter((w) => !confirmedKeys.has(warningKey(w))).length;
 
   return (
     <section className="nle-panel-section">
       <div
         className="nle-panel-header"
-        style={{ cursor: "pointer", display: "flex", justifyContent: "space-between" }}
-        onClick={() => setCollapsed(!collapsed)}
+        style={{ cursor: "default", display: "flex", justifyContent: "space-between" }}
       >
-        <span>{collapsed ? "▶" : "▼"} 危険フレーム ({unconfirmedCount}/{warnings.length})</span>
+        <span>危険フレーム ({unconfirmedCount}/{warnings.length})</span>
       </div>
-      {!collapsed && (
-        <div className="nle-panel-body" style={{ maxHeight: 200, overflowY: "auto" }}>
-          <ul className="nle-track-list" style={{ margin: 0, padding: 0 }}>
-            {warnings.map((w, i) => (
+      <div className="nle-panel-body" style={{ maxHeight: 200, overflowY: "auto" }}>
+        <ul className="nle-track-list" style={{ margin: 0, padding: 0 }}>
+          {warnings.map((w) => {
+            const key = warningKey(w);
+            const isConfirmed = confirmedKeys.has(key);
+            return (
               <li
-                key={`${w.trackId}-${w.frameIndex}-${i}`}
+                key={key}
                 className="nle-track-item"
                 style={{
                   cursor: "pointer",
-                  opacity: confirmed.has(i) ? 0.5 : 1,
-                  borderLeft: `3px solid ${reasonColor(w.reason)}`,
+                  opacity: isConfirmed ? 0.45 : 1,
+                  borderLeft: `3px solid ${isConfirmed ? "#555" : reasonColor(w.reason)}`,
                   paddingLeft: 6,
                 }}
                 onClick={() => onSeekFrame(w.frameIndex)}
@@ -58,20 +62,16 @@ export function DangerWarningsPanel({ warnings, onSeekFrame }: DangerWarningsPan
                   style={{ fontSize: "0.75em", padding: "1px 4px" }}
                   onClick={(e) => {
                     e.stopPropagation();
-                    setConfirmed((prev) => {
-                      const next = new Set(prev);
-                      if (next.has(i)) next.delete(i); else next.add(i);
-                      return next;
-                    });
+                    onToggleConfirmed(key);
                   }}
                 >
-                  {confirmed.has(i) ? "✓ 確認済み" : "確認"}
+                  {isConfirmed ? "✓ 確認済み" : "確認"}
                 </button>
               </li>
-            ))}
-          </ul>
-        </div>
-      )}
+            );
+          })}
+        </ul>
+      </div>
     </section>
   );
 }

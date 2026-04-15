@@ -17,6 +17,8 @@ export type DetectorCategoryKey =
 export type DetectorAvailability = {
   name: string;
   exists: boolean;
+  status?: "missing" | "broken" | "installed";
+  valid?: boolean;
   downloadable?: boolean;
   source?: string;
   note?: string | null;
@@ -143,24 +145,38 @@ export function unsupportedCategoryReason(backend: DetectorBackendKey): string {
   return `${option.title} では未対応のカテゴリです。別の検出モデルを選択してください。`;
 }
 
+export function isModelInstalled(model: DetectorAvailability): boolean {
+  if (model.status) return model.status === "installed";
+  if (typeof model.valid === "boolean") return model.valid;
+  return model.exists;
+}
+
+function modelStatusLabel(option: DetectorOption, related: DetectorAvailability[], available: boolean): string {
+  if (available) return option.bundled ? "同梱済み" : "利用可能";
+  if (related.some((item) => item.status === "broken" || (item.exists && item.valid === false))) {
+    return "破損";
+  }
+  return "未取得";
+}
+
 export function buildDetectorOptionStatuses(
   availableModels: DetectorAvailability[],
 ): DetectorOptionStatus[] {
   return DETECTOR_OPTIONS.map((option) => {
     const related = availableModels.filter((item) => option.modelNames.includes(item.name));
-    const existingCount = related.filter((item) => item.exists).length;
+    const installedCount = related.filter(isModelInstalled).length;
     // Composite backends need every constituent model; single-backend entries
     // stay happy with any one of their accepted filenames being present.
     const available = option.requiresAllModels
-      ? existingCount === option.modelNames.length && option.modelNames.length > 0
-      : related.some((item) => item.exists);
-    const missingCount = option.modelNames.length - existingCount;
+      ? installedCount === option.modelNames.length && option.modelNames.length > 0
+      : related.some(isModelInstalled);
+    const missingCount = option.modelNames.length - installedCount;
 
     return {
       ...option,
       available,
       missingCount,
-      statusLabel: option.bundled ? "同梱済み" : available ? "利用可能" : "未取得",
+      statusLabel: modelStatusLabel(option, related, available),
       reason: available
         ? option.description
         : related.find((item) => item.note)?.note ??

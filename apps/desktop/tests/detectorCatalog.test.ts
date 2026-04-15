@@ -30,3 +30,13 @@ test("detector catalog treats EraX onnx as usable, pt-only as not ready", () => 
   const eraxPt = statusesPt.find((item) => item.key === "erax_v1_1");
   assert.equal(eraxPt?.available, false);
 });
+
+test("detector catalog does not treat broken model files as available", () => {
+  const statuses = buildDetectorOptionStatuses([
+    { name: "320n.onnx", exists: true, valid: false, status: "broken" },
+  ]);
+
+  const defaultDetector = statuses.find((item) => item.key === "nudenet_320n");
+  assert.equal(defaultDetector?.available, false);
+  assert.equal(defaultDetector?.statusLabel, "破損");
+});

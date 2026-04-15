@@ -323,6 +323,17 @@ body,
   background: rgba(232, 168, 37, 0.35);
 }
 
+.nle-btn--cancel {
+  background: rgba(220, 60, 60, 0.18);
+  color: #ff9090;
+  border-color: rgba(220, 60, 60, 0.45);
+}
+
+.nle-btn--cancel:hover {
+  background: rgba(220, 60, 60, 0.32);
+  color: #ffb8b8;
+}
+
 /* ============================================================
    LEFT PANEL — Tracks & Project
    ============================================================ */
@@ -777,6 +788,10 @@ body,
   inset: 0;
 }
 
+.canvas-stage__edge-layer {
+  display: none;
+}
+
 .canvas-stage__edge-handle {
   position: absolute;
   width: 10px;
@@ -810,6 +825,46 @@ body,
   box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.7);
   cursor: grab;
   transition: transform 80ms, background 80ms;
+}
+
+.canvas-stage--dragging .canvas-stage__vertex {
+  transition: none;
+}
+
+.canvas-stage__context-menu {
+  position: absolute;
+  z-index: 12;
+  min-width: 112px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 4px;
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius-sm);
+  background: var(--bg-panel);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45);
+}
+
+.canvas-stage__context-menu button {
+  width: 100%;
+  padding: 6px 8px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.canvas-stage__context-menu button:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.canvas-stage__context-menu button:disabled {
+  color: var(--text-dim);
+  cursor: not-allowed;
 }
 
 .canvas-stage__vertex:hover {
@@ -1483,6 +1538,60 @@ body,
   display: flex;
   gap: 8px;
   justify-content: flex-end;
+}
+
+.recovery-modal {
+  width: min(720px, calc(100vw - 32px));
+  max-height: min(760px, calc(100vh - 32px));
+}
+
+.recovery-modal__list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: min(420px, 58vh);
+  overflow-y: auto;
+}
+
+.recovery-modal__item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: rgba(255, 255, 255, 0.035);
+}
+
+.recovery-modal__copy {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.recovery-modal__copy strong,
+.recovery-modal__copy span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.recovery-modal__copy strong {
+  color: var(--text-bright);
+}
+
+.recovery-modal__copy span {
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.recovery-modal__actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
 }
 
 /* ============================================================

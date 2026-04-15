@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { convertFileSrc, invoke } from "@tauri-apps/api/core";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import { open, save } from "@tauri-apps/plugin-dialog";
 import { CanvasStagePanel } from "./components/CanvasStagePanel";
 import { DetectorSettingsModal } from "./components/DetectorSettingsModal";
@@ -10,6 +11,7 @@ import { TimelineView } from "./components/TimelineView";
 import { TrackDetailPanel } from "./components/TrackDetailPanel";
 import {
   DETECTOR_OPTIONS,
+  isModelInstalled,
   isCategorySupportedByBackend,
   type DetectorAvailability,
   type DetectorBackendKey,
@@ -63,7 +65,17 @@ import type {
   VideoMetadata,
 } from "./types";
 
-type DoctorModelEntry = { name: string; exists: boolean; path: string; auto_fetch?: boolean };
+type DoctorModelEntry = {
+  name: string;
+  exists: boolean;
+  valid?: boolean;
+  status?: "missing" | "broken" | "installed";
+  path: string;
+  auto_fetch?: boolean;
+  downloadable?: boolean;
+  source?: string;
+  note?: string | null;
+};
 
 type DoctorData = {
   ready: boolean;
@@ -97,6 +109,13 @@ type MutationResult = {
   read_model: ProjectReadModel;
 };
 
+type RecoverySnapshot = {
+  id: string;
+  project: ProjectDocument;
+  readModel: ProjectReadModel | null;
+  timestamp: string;
+};
+
 const DEFAULT_EXPORT_OPTIONS = {
   mosaic_strength: 12,
   audio_mode: "mux_if_possible" as const,
@@ -104,9 +123,81 @@ const DEFAULT_EXPORT_OPTIONS = {
   bitrate_kbps: null as number | null,
 };
 
+const RECOVERY_KEY_PREFIX = "auto-mosaic-recovery:";
+const LEGACY_RECOVERY_KEY = "auto-mosaic-recovery";
+
 function fileNameFromPath(value: string | null | undefined) {
   if (!value) return "";
   return value.split(/[\\/]/).pop() ?? value;
+}
+
+function recoverySnapshotId(project: ProjectDocument) {
+  return String(project.project_id || project.project_path || project.video?.source_path || "unsaved");
+}
+
+function recoveryStorageKey(id: string) {
+  return `${RECOVERY_KEY_PREFIX}${id}`;
+}
+
+function loadRecoverySnapshots(): RecoverySnapshot[] {
+  const snapshots: RecoverySnapshot[] = [];
+  const seen = new Set<string>();
+
+  for (let index = 0; index < localStorage.length; index += 1) {
+    const key = localStorage.key(index);
+    if (!key?.startsWith(RECOVERY_KEY_PREFIX)) continue;
+    try {
+      const parsed = JSON.parse(localStorage.getItem(key) ?? "") as Partial<RecoverySnapshot>;
+      if (!parsed.project) continue;
+      const id = parsed.id || key.slice(RECOVERY_KEY_PREFIX.length);
+      snapshots.push({
+        id,
+        project: parsed.project,
+        readModel: parsed.readModel ?? null,
+        timestamp: parsed.timestamp ?? new Date().toISOString(),
+      });
+      seen.add(id);
+    } catch {
+      localStorage.removeItem(key);
+    }
+  }
+
+  const legacy = localStorage.getItem(LEGACY_RECOVERY_KEY);
+  if (legacy) {
+    try {
+      const parsed = JSON.parse(legacy) as { project?: ProjectDocument; readModel?: ProjectReadModel; timestamp?: string };
+      if (parsed.project) {
+        const id = recoverySnapshotId(parsed.project);
+        if (!seen.has(id)) {
+          snapshots.push({
+            id,
+            project: parsed.project,
+            readModel: parsed.readModel ?? null,
+            timestamp: parsed.timestamp ?? new Date().toISOString(),
+          });
+        }
+      }
+    } catch {
+      localStorage.removeItem(LEGACY_RECOVERY_KEY);
+    }
+  }
+
+  return snapshots.sort((a, b) => Date.parse(b.timestamp) - Date.parse(a.timestamp));
+}
+
+function saveRecoverySnapshot(project: ProjectDocument, readModel: ProjectReadModel | null) {
+  const snapshot: RecoverySnapshot = {
+    id: recoverySnapshotId(project),
+    project,
+    readModel,
+    timestamp: new Date().toISOString(),
+  };
+  localStorage.setItem(recoveryStorageKey(snapshot.id), JSON.stringify(snapshot));
+}
+
+function removeRecoverySnapshot(id: string) {
+  localStorage.removeItem(recoveryStorageKey(id));
+  localStorage.removeItem(LEGACY_RECOVERY_KEY);
 }
 
 function prettyError(error: unknown) {
@@ -135,10 +226,7 @@ function isTerminalDetectState(state: DetectJobSummary["state"]) {
 }
 
 function hasCollectableDetectResult(job: DetectJobSummary) {
-  return (
-    isTerminalDetectState(job.state) &&
-    (job.state === "succeeded" || Boolean(job.result_available) || Boolean(job.has_result))
-  );
+  return isTerminalDetectState(job.state) && job.state === "succeeded";
 }
 
 export function App() {
@@ -174,6 +262,8 @@ export function App() {
   const [project, setProject] = useState<ProjectDocument | null>(null);
   const [readModel, setReadModel] = useState<ProjectReadModel | null>(null);
   const [previewSrc, setPreviewSrc] = useState<string | null>(null);
+  const [recoveryCandidates, setRecoveryCandidates] = useState<RecoverySnapshot[]>([]);
+  const [recoveryModalOpen, setRecoveryModalOpen] = useState(false);
   const [projectDirty, setProjectDirty] = useState(false);
   const [selectedTrackId, setSelectedTrackId] = useState<string | null>(null);
   const [selectedKeyframeFrame, setSelectedKeyframeFrame] = useState<number | null>(null);
@@ -188,6 +278,9 @@ export function App() {
 
   const [runtimeJobs, setRuntimeJobs] = useState<Record<string, RuntimeJobSummary>>({});
   const [detectJobs, setDetectJobs] = useState<Record<string, DetectJobSummary>>({});
+  // Ref that mirrors detectJobs so the window-close handler can read current
+  // value without being re-registered every time detectJobs changes.
+  const detectJobsRef = useRef(detectJobs);
   const [activeExportJobId, setActiveExportJobId] = useState<string | null>(null);
   const [exportStatus, setExportStatus] = useState<ExportJobStatus | null>(null);
   const [exportCancelling, setExportCancelling] = useState(false);
@@ -209,6 +302,18 @@ export function App() {
     () => (project ? detectDangerousFrames(project) : []),
     [project],
   );
+  // 確認済み危険フレーム: key = `${trackId}-${frameIndex}`
+  // DangerWarningsPanel と TimelineView が共有する。プロジェクト変更時にリセット。
+  const [confirmedDangerFrames, setConfirmedDangerFrames] = useState<Set<string>>(new Set());
+
+  // 全体検出前の上書き確認モーダル
+  // resolve が null でない間はモーダルが開いている。
+  const overwriteResolveRef = useRef<((mode: "protected" | "overwrite_all" | "cancel") => void) | null>(null);
+  const [overwriteConfirmOpen, setOverwriteConfirmOpen] = useState(false);
+  const [overwriteConfirmInfo, setOverwriteConfirmInfo] = useState<{
+    trackCount: number;
+    manualCount: number;
+  } | null>(null);
 
   // ジョブ通知の dismiss 管理
   const [dismissedJobIds, setDismissedJobIds] = useState<Set<string>>(new Set());
@@ -227,16 +332,17 @@ export function App() {
   const [detectMaxSamples, setDetectMaxSamples] = useState(120);
   const [detectInferenceResolution, setDetectInferenceResolution] = useState(320);
   const [detectBatchSize, setDetectBatchSize] = useState(1);
-  const [detectContourMode, setDetectContourMode] = useState("none");
+  const [detectContourMode, setDetectContourMode] = useState("quality");
   const [detectPreciseFaceContour, setDetectPreciseFaceContour] = useState(false);
   const [detectVramSavingMode, setDetectVramSavingMode] = useState(false);
+  const detectDefaultsAppliedRef = useRef(false);
   const [detectSelectedCategories, setDetectSelectedCategories] = useState<DetectorCategoryKey[]>(
     ["male_genitalia", "female_genitalia", "female_face"],
   );
 
   const currentVideo = readModel?.video ?? project?.video ?? null;
   const requiredModelNames = useMemo(
-    () => (doctor?.models?.required ?? []).filter((item) => !item.exists).map((item) => item.name),
+    () => (doctor?.models?.required ?? []).filter((item) => !isModelInstalled(item)).map((item) => item.name),
     [doctor],
   );
 
@@ -265,6 +371,8 @@ export function App() {
     }
     setProject(result.project);
     setReadModel(result.read_model);
+    // プロジェクトが置き換わったら危険フレームの確認状態をリセットする。
+    setConfirmedDangerFrames(new Set());
     setProjectDirty(Boolean(options?.dirty));
     const sourcePath = options?.previewPath ?? result.project.video?.source_path ?? null;
     if (!sourcePath) {
@@ -278,6 +386,55 @@ export function App() {
       setPreviewSrc(null);
       setErrorMessage(prettyError(error));
     }
+  }
+
+  function resetEditorToBlank() {
+    setProject(null);
+    setReadModel(null);
+    setPreviewSrc(null);
+    setProjectDirty(false);
+    setSelectedTrackId(null);
+    setSelectedKeyframeFrame(null);
+    setCurrentFrame(0);
+    setPreviewKeyframeOverride(null);
+    setKeyframeRemoteError("");
+    setConfirmedDangerFrames(new Set());
+    setHistory(resetHistory(null));
+  }
+
+  function restoreRecoverySnapshot(snapshot: RecoverySnapshot) {
+    setProject(snapshot.project);
+    setReadModel(snapshot.readModel);
+    setProjectDirty(true);
+    setSelectedTrackId(null);
+    setSelectedKeyframeFrame(null);
+    setCurrentFrame(0);
+    setPreviewKeyframeOverride(null);
+    setKeyframeRemoteError("");
+    setConfirmedDangerFrames(new Set());
+    setHistory(resetHistory(null));
+    const sourcePath = snapshot.project.video?.source_path ?? null;
+    if (sourcePath) {
+      try {
+        assertRawFilePathForBackend(sourcePath, "recovery-preview");
+        setPreviewSrc(convertFileSrc(sourcePath));
+      } catch {
+        setPreviewSrc(null);
+      }
+    } else {
+      setPreviewSrc(null);
+    }
+    setRecoveryModalOpen(false);
+    setActivity("前回のセッションを復元しました");
+  }
+
+  function deleteRecoverySnapshot(snapshot: RecoverySnapshot) {
+    removeRecoverySnapshot(snapshot.id);
+    setRecoveryCandidates((current) => {
+      const next = current.filter((item) => item.id !== snapshot.id);
+      if (!next.length) setRecoveryModalOpen(false);
+      return next;
+    });
   }
 
   function applyMutationResult(result: MutationCommandData) {
@@ -351,16 +508,17 @@ export function App() {
     if (!confirmDiscardIfDirty()) return;
     const response = await backend<MutationResult>("create-project", {
       name: uiText.project.untitledName,
-      video: currentVideo,
-      tracks: project?.tracks ?? [],
+      video: null,
+      tracks: [],
     });
     if (!response.ok) {
       setErrorMessage(prettyError(response.error));
       return;
     }
-    syncProjectState(response.data, { dirty: Boolean(currentVideo), previewPath: currentVideo?.source_path ?? null });
+    syncProjectState(response.data, { dirty: false, previewPath: null });
     setSelectedTrackId(null);
     setSelectedKeyframeFrame(null);
+    setCurrentFrame(0);
     setActivity(uiText.activity.newProjectReady);
   }
 
@@ -550,13 +708,17 @@ export function App() {
   async function handleCommitKeyframePatch(patch: UpdateKeyframePayload["patch"]) {
     if (!selectedTrackId) return false;
     if (commitPlan.kind === "unavailable") return false;
-    const projectPath = await ensureEditableProjectPath();
-    if (!projectPath) return false;
+    if (!project) return false;
+    // project_path がある場合はファイルから読み書き、なければ inline project を渡して
+    // ディスク書き込みをスキップする in-memory 編集モード。
+    const projectRef = project.project_path
+      ? { project_path: project.project_path }
+      : { project };
 
     if (commitPlan.kind === "update-existing") {
       // currentFrame coincides with an explicit keyframe → update in place.
       const response = await backend<MutationCommandData>("update-keyframe", {
-        project_path: projectPath,
+        ...projectRef,
         track_id: selectedTrackId,
         frame_index: commitPlan.frameIndex,
         patch,
@@ -576,7 +738,7 @@ export function App() {
     // shape as base and overriding with the incoming patch.
     const base = commitPlan.base;
     const response = await backend<MutationCommandData>("create-keyframe", {
-      project_path: projectPath,
+      ...projectRef,
       track_id: selectedTrackId,
       frame_index: commitPlan.frameIndex,
       source: "manual",
@@ -689,7 +851,7 @@ export function App() {
   async function handleFetchModels() {
     const requiredMissing = requiredModelNames.length ? requiredModelNames : ["320n.onnx"];
     const autoFetchMissing = (doctor?.models?.optional ?? [])
-      .filter((m) => m.auto_fetch && !m.exists)
+      .filter((m) => m.auto_fetch && !isModelInstalled(m))
       .map((m) => m.name);
     const modelNames = [...new Set([...requiredMissing, ...autoFetchMissing])];
     await startRuntime("fetch_models", { model_names: modelNames });
@@ -750,16 +912,22 @@ export function App() {
 
   async function handleDetect() {
     if (!project) return;
-    // Overwrite confirmation when tracks already exist
+
+    // 既存トラックがある場合: 上書き確認モーダルを出す
+    let overwriteManualTracks = false;
     if (project.tracks.length > 0) {
       const manualCount = project.tracks.filter((t) => t.user_edited || t.source === "manual").length;
-      const msg = manualCount > 0
-        ? `${project.tracks.length} 件のトラックが存在します（手動編集 ${manualCount} 件含む）。\n\n` +
-          "「OK」→ 手動編集を保護して再検出\n" +
-          "「キャンセル」→ 中止"
-        : `${project.tracks.length} 件のトラックが存在します。\n再検出すると上書きされます。続行しますか？`;
-      if (!window.confirm(msg)) return;
+      setOverwriteConfirmInfo({ trackCount: project.tracks.length, manualCount });
+      const mode = await new Promise<"protected" | "overwrite_all" | "cancel">((resolve) => {
+        overwriteResolveRef.current = resolve;
+        setOverwriteConfirmOpen(true);
+      });
+      setOverwriteConfirmOpen(false);
+      overwriteResolveRef.current = null;
+      if (mode === "cancel") return;
+      overwriteManualTracks = mode === "overwrite_all";
     }
+
     // Only send categories the selected backend actually supports
     const categories = detectSelectedCategories.filter((cat) =>
       isCategorySupportedByBackend(detectBackend, cat),
@@ -778,6 +946,7 @@ export function App() {
       precise_face_contour: detectPreciseFaceContour,
       vram_saving_mode: detectVramSavingMode,
       enabled_label_categories: categories,
+      overwrite_manual_tracks: overwriteManualTracks,
     };
     // Range detection: pass in/out frame to limit detection scope.
     if (inFrame !== null && outFrame !== null && inFrame < outFrame) {
@@ -902,6 +1071,30 @@ export function App() {
 
   useEffect(() => {
     void runDoctor();
+  }, []);
+
+  // Keep detectJobsRef in sync so the close handler always sees current jobs.
+  useEffect(() => {
+    detectJobsRef.current = detectJobs;
+  }, [detectJobs]);
+
+  // On main window close: cancel any active detect jobs so detached worker
+  // processes receive the cancel flag before the app exits.
+  useEffect(() => {
+    let unlisten: (() => void) | null = null;
+    const win = getCurrentWindow();
+    win.onCloseRequested(async (event) => {
+      event.preventDefault();
+      const activeJobs = Object.values(detectJobsRef.current).filter(
+        (j) => isActiveDetectState(j.state),
+      );
+      await Promise.allSettled(
+        activeJobs.map((j) => cancelDetectJob(backend, j.job_id)),
+      );
+      await win.destroy();
+    }).then((fn) => { unlisten = fn; });
+    return () => { unlisten?.(); };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Keyboard shortcuts (aligned with PySide6 MainWindow.keyPressEvent)
@@ -1059,11 +1252,7 @@ export function App() {
     if (!project || !projectDirty) return;
     // Store recovery snapshot immediately on first dirty change.
     try {
-      localStorage.setItem("auto-mosaic-recovery", JSON.stringify({
-        project,
-        readModel,
-        timestamp: new Date().toISOString(),
-      }));
+      saveRecoverySnapshot(project, readModel);
     } catch { /* localStorage quota exceeded — ignore */ }
 
     if (!project.project_path) return;
@@ -1080,13 +1269,13 @@ export function App() {
   // Clear recovery snapshot after successful save.
   useEffect(() => {
     if (project && !projectDirty) {
-      localStorage.removeItem("auto-mosaic-recovery");
+      removeRecoverySnapshot(recoverySnapshotId(project));
     }
   }, [project, projectDirty]);
 
   // Startup: check for recovery snapshot.
   useEffect(() => {
-    const raw = localStorage.getItem("auto-mosaic-recovery");
+    const raw = "";
     if (!raw) return;
     try {
       const recovery = JSON.parse(raw) as { project: ProjectDocument; readModel: ProjectReadModel; timestamp: string };
@@ -1113,6 +1302,14 @@ export function App() {
   }, []);
 
   useEffect(() => {
+    const snapshots = loadRecoverySnapshots();
+    resetEditorToBlank();
+    if (!snapshots.length) return;
+    setRecoveryCandidates(snapshots);
+    setRecoveryModalOpen(true);
+  }, []);
+
+  useEffect(() => {
     const activeJobIds = Object.values(runtimeJobs).filter((job) => isActiveRuntimeState(job.state)).map((job) => job.job_id);
     if (!activeJobIds.length) return;
     const timer = window.setInterval(() => {
@@ -1126,7 +1323,7 @@ export function App() {
           const result = await collectRuntimeJobResult(backend, jobId);
           if (!result?.ok) {
             if (status.error_message) setErrorMessage(status.error_message);
-            if (status.job_kind === "fetch_models") void runDoctor();
+            if (status.job_kind === "fetch_models" || status.job_kind === "setup_erax_convert") void runDoctor();
             return;
           }
           if (status.job_kind === "open_video") {
@@ -1157,19 +1354,15 @@ export function App() {
         pendingJobIds.map(async (jobId) => {
           try {
             if (processedDetectJobsRef.current.has(jobId)) return;
-            // Always re-poll status for unprocessed jobs.  Backend
-            // reconcile_job_state may upgrade "interrupted" → "succeeded"
-            // when it discovers result.json after the worker exits.
             const status = await pollDetectJobStatus(backend, jobId);
             if (!status) return;
+
             setDetectJobs((current) => ({ ...current, [jobId]: status }));
 
             // Can we collect the result?
             if (!isTerminalDetectState(status.state)) return;
-            // For non-succeeded terminal states without a result, show the
-            // error and stop.  "interrupted" with no result_available will be
-            // re-polled next interval (reconcile may fix it).
-            if (status.state !== "succeeded" && !status.result_available && !status.has_result) {
+            // For non-succeeded terminal states, show the error and stop.
+            if (status.state !== "succeeded") {
               // Only surface the error once — skip if we already showed it.
               if (status.error && !collectingDetectJobsRef.current.has(jobId)) {
                 setErrorMessage(prettyError(status.error) || `Detection ${status.state}`);
@@ -1243,6 +1436,34 @@ export function App() {
     ? true
     : (doctor?.onnxruntime?.cuda_session_ok === undefined &&
        (doctor?.onnxruntime?.providers ?? []).includes("CUDAExecutionProvider"));
+  const hasDirectMl = (doctor?.onnxruntime?.providers ?? []).includes("DmlExecutionProvider");
+
+  useEffect(() => {
+    if (!doctor?.onnxruntime || detectDefaultsAppliedRef.current) return;
+    detectDefaultsAppliedRef.current = true;
+    setDetectDevice("auto");
+    if (hasCuda) {
+      setDetectInferenceResolution(640);
+      setDetectBatchSize(4);
+      setDetectSampleEvery(1);
+      setDetectMaxSamples(240);
+      setDetectVramSavingMode(false);
+      return;
+    }
+    if (hasDirectMl) {
+      setDetectInferenceResolution(320);
+      setDetectBatchSize(2);
+      setDetectSampleEvery(1);
+      setDetectMaxSamples(180);
+      setDetectVramSavingMode(true);
+      return;
+    }
+    setDetectInferenceResolution(320);
+    setDetectBatchSize(1);
+    setDetectSampleEvery(2);
+    setDetectMaxSamples(120);
+    setDetectVramSavingMode(true);
+  }, [doctor?.onnxruntime, hasCuda, hasDirectMl]);
   const selectedTrackDocument = useMemo(
     () => project?.tracks.find((track) => track.track_id === selectedTrackId) ?? null,
     [project, selectedTrackId],
@@ -1307,13 +1528,28 @@ export function App() {
   const eraxState = doctor?.erax?.state ?? "missing";
   const eraxConvertible = Boolean(doctor?.erax?.convertible);
   const eraxConvertBusy = Boolean(activeRuntimeByKind.get("setup_erax_convert"));
-  // SAM2 は encoder と decoder の両方が揃って初めて利用可能とする。
   const hasSam2 = useMemo(() => {
     const optionals = doctor?.models?.optional ?? [];
-    const enc = optionals.find((m) => m.name === "sam2_tiny_encoder.onnx");
-    const dec = optionals.find((m) => m.name === "sam2_tiny_decoder.onnx");
-    return Boolean(enc?.exists && dec?.exists);
+    const encoder = optionals.find((m) => m.name === "sam2_tiny_encoder.onnx");
+    const decoder = optionals.find((m) => m.name === "sam2_tiny_decoder.onnx");
+    return Boolean(encoder && decoder && isModelInstalled(encoder) && isModelInstalled(decoder));
   }, [doctor]);
+
+  // Auto-trigger EraX ONNX conversion when PT is downloaded and ultralytics
+  // is available.  This removes the need for a manual "Convert to ONNX" button
+  // — the conversion fires as soon as the doctor check reports the conditions.
+  const eraxAutoConvertFiredRef = useRef(false);
+  useEffect(() => {
+    if (eraxState === "downloaded_pt" && eraxConvertible && !eraxConvertBusy && !eraxAutoConvertFiredRef.current) {
+      eraxAutoConvertFiredRef.current = true;
+      void handleConvertErax();
+    }
+    // Reset the guard when the state changes away from downloaded_pt so that
+    // a fresh download can trigger conversion again.
+    if (eraxState !== "downloaded_pt") {
+      eraxAutoConvertFiredRef.current = false;
+    }
+  }, [eraxState, eraxConvertible, eraxConvertBusy]);
 
   // Auto-deselect categories not supported by the newly selected backend
   useEffect(() => {
@@ -1390,6 +1626,21 @@ export function App() {
     setKeyframeRemoteError("");
   }, [selectedTrackId, selectedKeyframeFrame]);
 
+  // Show splash screen while the initial doctor check is running.
+  if (!doctor) {
+    return (
+      <main className="app-shell app-shell--splash">
+        <div className="startup-splash">
+          <p className="startup-splash__eyebrow">Auto Mosaic</p>
+          <h1 className="startup-splash__title">起動中です</h1>
+          <p className="startup-splash__body">
+            バックエンドの環境を確認しています。しばらくお待ちください…
+          </p>
+        </div>
+      </main>
+    );
+  }
+
   return (
     <main className="app-shell">
       <nav className="nle-menubar">
@@ -1453,7 +1704,18 @@ export function App() {
             </div>
           </div>
         </section>
-        <DangerWarningsPanel warnings={dangerWarnings} onSeekFrame={handleSeekFrame} />
+        <DangerWarningsPanel
+          warnings={dangerWarnings}
+          confirmedKeys={confirmedDangerFrames}
+          onToggleConfirmed={(key) =>
+            setConfirmedDangerFrames((prev) => {
+              const next = new Set(prev);
+              if (next.has(key)) next.delete(key); else next.add(key);
+              return next;
+            })
+          }
+          onSeekFrame={handleSeekFrame}
+        />
         <section className="nle-panel-section nle-panel-section--grow">
           <div className="nle-panel-header">{uiText.panels.models}</div>
           <div className="nle-panel-body">
@@ -1465,17 +1727,25 @@ export function App() {
               if (!allModels.length) return <div className="nle-empty">{uiText.models.empty}</div>;
               return (
                 <ul className="nle-track-list">
-                  {allModels.map((item) => (
-                    <li key={item.name} className="nle-track-item">
-                      <span className="nle-track-item__name">
-                        {item.name}
-                        {item._required && <span style={{ color: "#e55", marginLeft: 4, fontSize: "0.8em" }}>*</span>}
-                      </span>
-                      <span className="nle-track-item__meta" style={{ color: item.exists ? "#4caf50" : "#999" }}>
-                        {item.exists ? uiText.models.ready : uiText.models.missing}
-                      </span>
-                    </li>
-                  ))}
+                  {allModels.map((item) => {
+                    const installed = isModelInstalled(item);
+                    const statusLabel = installed
+                      ? uiText.models.ready
+                      : item.status === "broken"
+                      ? "破損"
+                      : uiText.models.missing;
+                    return (
+                      <li key={item.name} className="nle-track-item">
+                        <span className="nle-track-item__name">
+                          {item.name}
+                          {item._required && <span style={{ color: "#e55", marginLeft: 4, fontSize: "0.8em" }}>*</span>}
+                        </span>
+                        <span className="nle-track-item__meta" style={{ color: installed ? "#4caf50" : item.status === "broken" ? "#e55" : "#999" }}>
+                          {statusLabel}
+                        </span>
+                      </li>
+                    );
+                  })}
                 </ul>
               );
             })()}
@@ -1624,6 +1894,7 @@ export function App() {
           inFrame={inFrame}
           outFrame={outFrame}
           dangerMarkers={dangerWarnings}
+          confirmedDangerMarkers={confirmedDangerFrames}
           busy={keyframeEditorBusy}
           onSelectTrack={(trackId) => {
             setSelectedTrackId(trackId);
@@ -1641,6 +1912,49 @@ export function App() {
 
       <JobPanel jobs={visibleJobPanelItems} onCancel={(job) => void handleCancelJob(job)} onDismiss={handleDismissJob} />
 
+      {recoveryModalOpen && recoveryCandidates.length ? (
+        <div className="guard-modal-backdrop" role="presentation">
+          <section className="guard-modal recovery-modal" role="dialog" aria-modal="true" aria-labelledby="recovery-modal-title">
+            <p className="eyebrow">Session Recovery</p>
+            <h2 id="recovery-modal-title">前回のセッションの復元候補</h2>
+            <p className="guard-modal__body">
+              未保存のプロジェクト候補が見つかりました。復元する候補を選ぶか、不要な候補を削除してください。
+            </p>
+            <div className="recovery-modal__list">
+              {recoveryCandidates.map((candidate) => {
+                const videoPath = candidate.project.video?.source_path ?? "動画なし";
+                const updatedAt = new Date(candidate.timestamp).toLocaleString();
+                return (
+                  <article key={candidate.id} className="recovery-modal__item">
+                    <div className="recovery-modal__copy">
+                      <strong>{candidate.project.name || uiText.project.untitledName}</strong>
+                      <span>{updatedAt}</span>
+                      <span>{videoPath}</span>
+                    </div>
+                    <div className="recovery-modal__actions">
+                      <button className="nle-btn nle-btn--accent" onClick={() => restoreRecoverySnapshot(candidate)}>
+                        復元
+                      </button>
+                      <button className="nle-btn nle-btn--cancel" onClick={() => deleteRecoverySnapshot(candidate)}>
+                        削除
+                      </button>
+                    </div>
+                  </article>
+                );
+              })}
+            </div>
+            <div className="guard-modal__actions">
+              <button className="nle-btn" onClick={() => setRecoveryModalOpen(false)}>
+                また後にする
+              </button>
+              <button className="nle-btn" onClick={() => setRecoveryModalOpen(false)}>
+                閉じる
+              </button>
+            </div>
+          </section>
+        </div>
+      ) : null}
+
       <DetectorSettingsModal
         open={detectModalOpen}
         selectedBackend={detectBackend}
@@ -1657,6 +1971,7 @@ export function App() {
         requiredModels={detectRequiredModels}
         optionalModels={detectOptionalModels}
         hasCuda={hasCuda}
+        hasDirectMl={hasDirectMl}
         hasSam2={hasSam2}
         onnxVersion={onnxVersion}
         modelFetchBusy={modelFetchBusy}
@@ -1680,7 +1995,6 @@ export function App() {
         onRun={() => void handleDetect()}
         onFetchRequired={() => void handleFetchModels()}
         onFetchErax={() => void handleFetchErax()}
-        onConvertErax={() => void handleConvertErax()}
         onRecheck={() => void runDoctor()}
         onClose={() => setDetectModalOpen(false)}
       />
@@ -1691,6 +2005,42 @@ export function App() {
         onExport={(s) => void handleExportWithSettings(s)}
         defaultSettings={exportSettings}
       />
+
+      {/* 全体検出前の上書き確認モーダル */}
+      {overwriteConfirmOpen && overwriteConfirmInfo && (
+        <div className="guard-modal-backdrop" role="presentation">
+          <section className="guard-modal" role="dialog" aria-modal="true" aria-labelledby="overwrite-confirm-title">
+            <h2 id="overwrite-confirm-title">既存トラックの扱い</h2>
+            <p className="guard-modal__body">
+              {overwriteConfirmInfo.manualCount > 0
+                ? `${overwriteConfirmInfo.trackCount} 件のトラックが存在します（手動編集 ${overwriteConfirmInfo.manualCount} 件含む）。再検出時の処理を選択してください。`
+                : `${overwriteConfirmInfo.trackCount} 件の AI 検出トラックが存在します。再検出すると上書きされます。`}
+            </p>
+            <div className="guard-modal__actions" style={{ flexDirection: "column", gap: 8 }}>
+              <button
+                className="nle-btn nle-btn--accent"
+                onClick={() => overwriteResolveRef.current?.("protected")}
+              >
+                手動編集を保護して再検出
+              </button>
+              {overwriteConfirmInfo.manualCount > 0 && (
+                <button
+                  className="nle-btn nle-btn--cancel"
+                  onClick={() => overwriteResolveRef.current?.("overwrite_all")}
+                >
+                  全上書きで再検出（手動編集も削除）
+                </button>
+              )}
+              <button
+                className="nle-btn"
+                onClick={() => overwriteResolveRef.current?.("cancel")}
+              >
+                キャンセル
+              </button>
+            </div>
+          </section>
+        </div>
+      )}
 
       <footer className="nle-statusbar">
         <span className="nle-statusbar__item">{project?.name ?? uiText.project.none}</span>

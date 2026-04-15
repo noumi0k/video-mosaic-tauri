@@ -13,6 +13,8 @@ type TimelineViewProps = {
   inFrame: number | null;
   outFrame: number | null;
   dangerMarkers: DangerousFrame[];
+  /** 確認済み危険フレームのキーセット: `${trackId}-${frameIndex}` */
+  confirmedDangerMarkers?: Set<string>;
   busy: boolean;
   onSelectTrack: (trackId: string) => void;
   onSelectKeyframe: (trackId: string, frameIndex: number) => void;
@@ -55,6 +57,7 @@ export function TimelineView({
   inFrame,
   outFrame,
   dangerMarkers,
+  confirmedDangerMarkers,
   busy,
   onSelectTrack,
   onSelectKeyframe,
@@ -188,16 +191,20 @@ export function TimelineView({
                   {label}
                 </div>
               ))}
-              {/* Danger frame markers */}
+              {/* Danger frame markers — 確認済みはグレー表示 */}
               {dangerMarkers.map((d, i) => {
                 const pct = framePct(d.frameIndex);
-                const color = d.reason.includes("gap") ? "#ff9800" : d.reason.includes("Area") ? "#03a9f4" : "#e91e63";
+                const key = `${d.trackId}-${d.frameIndex}`;
+                const confirmed = confirmedDangerMarkers?.has(key) ?? false;
+                const color = confirmed
+                  ? "#555"
+                  : d.reason.includes("gap") ? "#ff9800" : d.reason.includes("Area") ? "#03a9f4" : "#e91e63";
                 return (
                   <div
                     key={`danger-${i}`}
                     className="nle-tlv__danger-marker"
-                    style={{ left: pct, borderBottomColor: color }}
-                    title={`F${d.frameIndex}: ${d.reason}`}
+                    style={{ left: pct, borderBottomColor: color, opacity: confirmed ? 0.45 : 1 }}
+                    title={`F${d.frameIndex}: ${d.reason}${confirmed ? " (確認済み)" : ""}`}
                     onClick={(e) => { e.stopPropagation(); onSeekFrame(d.frameIndex); }}
                   />
                 );

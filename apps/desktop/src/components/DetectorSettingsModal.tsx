@@ -3,6 +3,7 @@ import React from "react";
 import {
   buildDetectorOptionStatuses,
   DETECTOR_CATEGORIES,
+  isModelInstalled,
   isCategorySupportedByBackend,
   unsupportedCategoryReason,
   type DetectorAvailability,
@@ -26,6 +27,7 @@ type Props = {
   requiredModels: DetectorAvailability[];
   optionalModels: DetectorAvailability[];
   hasCuda: boolean;
+  hasDirectMl: boolean;
   hasSam2: boolean;
   onnxVersion: string | null;
   modelFetchBusy: boolean;
@@ -45,7 +47,6 @@ type Props = {
   onRun: () => void;
   onFetchRequired: () => void;
   onFetchErax: () => void;
-  onConvertErax: () => void;
   onRecheck: () => void;
   onClose: () => void;
 };
@@ -57,8 +58,8 @@ export function DetectorSettingsModal(props: Props) {
 
   const detectorOptions = buildDetectorOptionStatuses(props.availableModels);
   const selectedOption = detectorOptions.find((option) => option.key === props.selectedBackend) ?? detectorOptions[0];
-  const missingRequiredCount = props.requiredModels.filter((item) => !item.exists).length;
-  const missingOptionalCount = props.optionalModels.filter((item) => !item.exists).length;
+  const missingRequiredCount = props.requiredModels.filter((item) => !isModelInstalled(item)).length;
+  const missingOptionalCount = props.optionalModels.filter((item) => !isModelInstalled(item)).length;
 
   return (
     <div className="guard-modal-backdrop" role="presentation">
@@ -76,8 +77,8 @@ export function DetectorSettingsModal(props: Props) {
           <div className={`detect-modal__status-chip detect-modal__status-chip--${missingOptionalCount === 0 ? "neutral" : "warning"}`}>
             追加モデル: {missingOptionalCount === 0 ? "OK" : `${missingOptionalCount} 件未取得`}
           </div>
-          <div className={`detect-modal__status-chip detect-modal__status-chip--neutral`}>
-            SAM2: {props.hasSam2 ? "利用可能" : "未取得 (高精度輪郭のみ使用・任意)"}
+          <div className={`detect-modal__status-chip detect-modal__status-chip--${props.hasSam2 ? "ready" : "warning"}`}>
+            SAM2: {props.hasSam2 ? "利用可能" : "未取得 / 破損"}
           </div>
           {props.onnxVersion ? <div className="detect-modal__status-chip detect-modal__status-chip--neutral">ONNX Runtime {props.onnxVersion}</div> : null}
         </div>
@@ -190,19 +191,15 @@ export function DetectorSettingsModal(props: Props) {
                     ) : null}
                     {isErax && props.eraxState === "downloaded_pt" ? (
                       <>
-                        <button
-                          className="nle-btn nle-btn--sm nle-btn--gold"
-                          onClick={props.onConvertErax}
-                          disabled={!props.eraxConvertible || props.eraxConvertBusy}
-                          type="button"
-                        >
-                          {props.eraxConvertBusy ? "変換中…" : "ONNX に変換"}
-                        </button>
-                        {!props.eraxConvertible ? (
+                        {props.eraxConvertBusy ? (
+                          <p className="detect-modal__inline-note">ONNX 自動変換中…</p>
+                        ) : props.eraxConvertible ? (
+                          <p className="detect-modal__inline-note">ONNX 自動変換を準備中…</p>
+                        ) : (
                           <p className="detect-modal__inline-note">
-                            変換には ultralytics が必要です。<code>pip install ultralytics</code> を実行後、再チェックしてください。
+                            ONNX 自動変換には ultralytics が必要です。<code>pip install ultralytics</code> を実行後、再チェックしてください。
                           </p>
-                        ) : null}
+                        )}
                       </>
                     ) : null}
                   </div>
@@ -259,6 +256,10 @@ export function DetectorSettingsModal(props: Props) {
                 <strong>{props.threshold.toFixed(2)}</strong>
               </div>
             </label>
+            <label className="detect-modal__toggle-row">
+              <input type="checkbox" checked={props.vramSavingMode} onChange={(event) => props.onVramSavingModeChange(event.currentTarget.checked)} />
+              <span>VRAM 節約モード</span>
+            </label>
           </div>
         </div>
 
@@ -304,16 +305,13 @@ export function DetectorSettingsModal(props: Props) {
         <div className="detect-modal__section">
           <div className="detect-modal__section-header">
             <span>輪郭モード</span>
-            <span className="detect-modal__section-note">速度・見た目・追加モデル要否で選べます。</span>
+            <span className="detect-modal__section-note">SAM2 がない場合は標準輪郭へフォールバックします。</span>
           </div>
           <div className="detect-modal__param-grid">
             <label className="detect-modal__param-card detect-modal__param-card--wide">
               <span>輪郭モード</span>
               <div className="detect-modal__param-input">
                 <select value={props.contourMode} onChange={(event) => props.onContourModeChange(event.currentTarget.value)}>
-                  {/* P2: plain-language labels. The internal keys
-                      (none/fast/balanced/quality) are kept so existing
-                      backend pipelines don't need to change. */}
                   <option value="none">枠のみ(最速) — 輪郭抽出なし</option>
                   <option value="fast">軽量輪郭(速い) — ざっくり、細部は崩れやすい</option>
                   <option value="balanced">標準輪郭(普段使い) — 速度と形の安定性のバランス</option>
@@ -322,13 +320,15 @@ export function DetectorSettingsModal(props: Props) {
                 <em>mode</em>
               </div>
             </label>
-            <p className="detect-modal__section-note detect-modal__section-note--hint">
-              輪郭抽出に失敗した場合は自動で枠ベースに戻ります。高精度輪郭は検出器ではなく輪郭補助モデルです。
-            </p>
-            <label className="detect-modal__toggle-row">
-              <input type="checkbox" checked={props.vramSavingMode} onChange={(event) => props.onVramSavingModeChange(event.currentTarget.checked)} />
-              <span>VRAM 節約モード</span>
-            </label>
+            {!props.hasSam2 && props.contourMode === "quality" ? (
+              <p className="detect-modal__section-note detect-modal__section-note--hint">
+                SAM2 encoder/decoder が未準備です。「不足モデルを取得」で取得してください。未準備のまま実行すると標準輪郭で処理します。
+              </p>
+            ) : (
+              <p className="detect-modal__section-note detect-modal__section-note--hint">
+                輪郭抽出に失敗した場合は自動で枠ベースに戻ります。高精度輪郭は検出器ではなく輪郭補助モデルです。
+              </p>
+            )}
           </div>
         </div>
 

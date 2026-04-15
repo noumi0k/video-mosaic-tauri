@@ -79,7 +79,7 @@ export function JobPanel(props: JobPanelProps) {
                 <span>{job.is_indeterminate ? uiText.jobs.indeterminate : `${job.progress_percent ?? 0}%`}</span>
                 <span>{job.subtitle}</span>
                 {job.can_cancel ? (
-                  <button className="nle-btn nle-btn--small" onClick={() => props.onCancel(job)}>
+                  <button className="nle-btn nle-btn--small nle-btn--cancel" onClick={() => props.onCancel(job)}>
                     {uiText.actions.cancel}
                   </button>
                 ) : null}
