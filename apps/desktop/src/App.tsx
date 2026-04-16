@@ -39,6 +39,7 @@ import {
   findExplicitKeyframeSummary,
   planCommitMutation,
   resolveForEditing,
+  resolveForRender,
   type ResolveReason,
 } from "./maskShapeResolver";
 import { buildCreateTrackPayload } from "./manualTrackFactory";
@@ -362,6 +363,7 @@ export function App() {
   const [playbackRate, setPlaybackRate] = useState<number>(1);
   const [isVideoPlaying, setIsVideoPlaying] = useState<boolean>(false);
   const [onionSkinEnabled, setOnionSkinEnabled] = useState<boolean>(false);
+  const [diffOverlayEnabled, setDiffOverlayEnabled] = useState<boolean>(false);
 
   // Detector settings modal state
   const [detectModalOpen, setDetectModalOpen] = useState(false);
@@ -1304,6 +1306,17 @@ export function App() {
         void handleCreateTrack("ellipse");
         return;
       }
+      // M: Toggle mosaic preview / Shift+M: Toggle diff overlay
+      if (e.key === "m" && !ctrl && !shift) {
+        e.preventDefault();
+        setMosaicPreviewEnabled((v) => !v);
+        return;
+      }
+      if (e.key === "M" && !ctrl) {
+        e.preventDefault();
+        setDiffOverlayEnabled((v) => !v);
+        return;
+      }
       // I: Set in frame
       if (e.key === "i" && !ctrl && !shift) {
         e.preventDefault();
@@ -1616,6 +1629,18 @@ export function App() {
     }
     return { prev, next };
   }, [selectedTrackDocument, currentFrame]);
+  const diffOverlayShapes = useMemo(() => {
+    if (!project?.tracks?.length) return [];
+    const out: { trackId: string; keyframe: typeof project.tracks[number]["keyframes"][number] }[] = [];
+    for (const track of project.tracks) {
+      if (!track.visible) continue;
+      if (!track.export_enabled) continue;
+      const resolved = resolveForRender(track, currentFrame);
+      if (!resolved) continue;
+      out.push({ trackId: track.track_id, keyframe: resolved.keyframe });
+    }
+    return out;
+  }, [project, currentFrame]);
   const activeRuntimeByKind = useMemo(() => {
     const index = new Map<RuntimeJobSummary["job_kind"], RuntimeJobSummary>();
     for (const job of Object.values(runtimeJobs)) {
@@ -1949,6 +1974,8 @@ export function App() {
                   onionSkinEnabled={onionSkinEnabled}
                   onionSkinPrev={onionSkinKeyframes.prev}
                   onionSkinNext={onionSkinKeyframes.next}
+                  diffOverlayEnabled={diffOverlayEnabled}
+                  diffOverlayShapes={diffOverlayShapes}
                   onPreviewKeyframeChange={setPreviewKeyframeOverride}
                   onClearRemoteError={() => setKeyframeRemoteError("")}
                   onCommitKeyframePatch={handleCommitKeyframePatch}
@@ -1971,6 +1998,13 @@ export function App() {
                 title={onionSkinEnabled ? "オニオンスキンを非表示" : "前後フレームのマスクを半透明で重ねる"}
               >
                 {onionSkinEnabled ? "オニオン ON" : "オニオン OFF"}
+              </button>
+              <button
+                className={`nle-btn nle-btn--small nle-preview__diff-toggle${diffOverlayEnabled ? " nle-preview__diff-toggle--active" : ""}`}
+                onClick={() => setDiffOverlayEnabled((v) => !v)}
+                title={diffOverlayEnabled ? "差分オーバーレイを非表示" : "モザイク適用領域を色付きで重ねる (Shift+M)"}
+              >
+                {diffOverlayEnabled ? "差分 ON" : "差分 OFF"}
               </button>
             </div>
           </>

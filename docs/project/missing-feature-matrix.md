@@ -40,8 +40,11 @@
 - [x] **M-C05** shortcut help modal (F1) (2026-04-17)
 - [x] **M-C06** canvas mode badge (再生状態 / モザイク / 選択トラック) (2026-04-17)
 - [x] **M-C07** onion skin オーバーレイ (前後 explicit keyframe の破線表示) (2026-04-17)
+- [x] **M-C08** diff overlay (Shift+M、モザイク適用領域をマゼンタ半透明で可視化) (2026-04-17)
 - [x] **M-C09** UI 言語切替 (ja / en) ヘッダートグル + localStorage (2026-04-17)
 - [x] **M-C10** inspector 折りたたみ状態の localStorage 永続化 (2026-04-17)
+
+**Phase D (Editing UX Completion) は全 10 項目達成**。目視レビュー待ち。
 
 この文書では、上記に対してまだ不足している機能だけを列挙する。
 
@@ -77,7 +80,7 @@
 | ~~M-C05~~ | `feature_list` 17, 19 | done | shortcut help を専用 modal 化 | 2026-04-17: `ShortcutHelpModal` を導入、F1 は window.alert から modal に置換、カテゴリ別テーブル表示。未接続 `Ctrl+M` `Ctrl+E` は採否判断保留 | D |
 | ~~M-C06~~ | `feature_list` 3-5, `unique_features` 16 | done | preview mode badge、timeline legend、lost/inactive 可視化 | 2026-04-17 (2nd): canvas 左上に再生状態 / モザイク / 選択トラック (`非表示` `書き出し外` `ロック` サブラベル) を示す mode badge を追加。timeline legend も拡張済み | D |
 | ~~M-C07~~ | `project checklist` D-09, `pyside6-ui-structure-reference` | done | onion skin | 2026-04-17 (2nd): 前後の explicit keyframe を canvas に SVG で重ね (前=青破線 / 次=橙破線)、preview バーの `オニオン ON/OFF` でトグル | D |
-| M-C08 | `feature_list` 3-4 | deferred | diff overlay | 仕様上はあるが、現行完成条件では後段 (2026-04-17 再評価: Phase D の他項目達成後に改めて判断。当面 deferred 維持) | D |
+| ~~M-C08~~ | `feature_list` 3-4 | done | diff overlay | 2026-04-17 (3rd): `Shift+M` で全 visible && export_enabled track の resolve_for_render 結果を canvas に半透明 (マゼンタ) で重ねる。preview バーに `差分 ON/OFF` トグル、ShortcutHelpModal にも追記 | D |
 | ~~M-C09~~ | `feature_list` 18-1 | done | 日本語 / 英語の UI 言語切替 | 2026-04-17 (2nd): `uiText` を `UiText` 型化し `getUiText(lang)` を追加、英訳の完全辞書を導入。header に ja/EN 切替ボタン、設定は `auto-mosaic:language` localStorage に保存 | D |
 | ~~M-C10~~ | `feature_list` 19-3 | done | property panel の折りたたみセクション | 2026-04-17: `usePersistedDetails` hook を導入し、5 つの inspector section の開閉状態を localStorage に永続化 | D |
 

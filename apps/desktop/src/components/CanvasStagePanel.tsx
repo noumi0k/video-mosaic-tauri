@@ -49,6 +49,9 @@ type CanvasStagePanelProps = {
   onionSkinPrev?: Keyframe | null;
   /** Next explicit keyframe (frame_index > currentFrame) of the selected track. */
   onionSkinNext?: Keyframe | null;
+  diffOverlayEnabled?: boolean;
+  /** All visible + export_enabled tracks' resolved shapes at currentFrame. */
+  diffOverlayShapes?: readonly { trackId: string; keyframe: Keyframe }[];
   onPreviewKeyframeChange: (keyframe: Keyframe | null) => void;
   onClearRemoteError: () => void;
   onCommitKeyframePatch: (patch: UpdateKeyframePayload["patch"]) => Promise<boolean>;
@@ -56,6 +59,41 @@ type CanvasStagePanelProps = {
 
 function toPercent(value: number) {
   return `${Math.max(0, Math.min(value, 1)) * 100}%`;
+}
+
+function renderDiffShape(keyframe: Keyframe, trackId: string) {
+  const className = "canvas-stage__diff-shape";
+  if (keyframe.shape_type === "ellipse" && keyframe.bbox?.length === 4) {
+    const cx = keyframe.bbox[0]! + keyframe.bbox[2]! / 2;
+    const cy = keyframe.bbox[1]! + keyframe.bbox[3]! / 2;
+    const rx = keyframe.bbox[2]! / 2;
+    const ry = keyframe.bbox[3]! / 2;
+    const rotation = keyframe.rotation ?? 0;
+    const transform = rotation ? `rotate(${rotation} ${cx} ${cy})` : undefined;
+    return (
+      <ellipse
+        key={`diff-${trackId}-${keyframe.frame_index}`}
+        className={className}
+        cx={cx}
+        cy={cy}
+        rx={rx}
+        ry={ry}
+        transform={transform}
+        vectorEffect="non-scaling-stroke"
+      />
+    );
+  }
+  if (keyframe.shape_type === "polygon" && (keyframe.points?.length ?? 0) >= 3) {
+    return (
+      <polygon
+        key={`diff-${trackId}-${keyframe.frame_index}`}
+        className={className}
+        points={keyframe.points.map((p) => `${p[0]},${p[1]}`).join(" ")}
+        vectorEffect="non-scaling-stroke"
+      />
+    );
+  }
+  return null;
 }
 
 function renderOnionShape(keyframe: Keyframe, variant: "prev" | "next") {
@@ -107,6 +145,8 @@ export function CanvasStagePanel({
   onionSkinEnabled = false,
   onionSkinPrev = null,
   onionSkinNext = null,
+  diffOverlayEnabled = false,
+  diffOverlayShapes = [],
   onPreviewKeyframeChange,
   onClearRemoteError,
   onCommitKeyframePatch,
@@ -415,6 +455,18 @@ export function CanvasStagePanel({
           >
             {onionSkinPrev ? renderOnionShape(onionSkinPrev, "prev") : null}
             {onionSkinNext ? renderOnionShape(onionSkinNext, "next") : null}
+          </svg>
+        ) : null}
+        {diffOverlayEnabled && diffOverlayShapes.length > 0 ? (
+          <svg
+            className="canvas-stage__diff-svg"
+            viewBox="0 0 1 1"
+            preserveAspectRatio="none"
+            aria-hidden="true"
+          >
+            {diffOverlayShapes.map((entry) =>
+              renderDiffShape(entry.keyframe, entry.trackId),
+            )}
           </svg>
         ) : null}
         {/* Operation mode badge — top-left */}

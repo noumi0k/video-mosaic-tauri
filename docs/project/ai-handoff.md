@@ -3,7 +3,8 @@
 > 位置づけ: このファイルは直近作業の handoff log です。現行実装の正本は `docs/engineering/current-implementation.md`、実装済み / 未実装 backlog の正本は `docs/project/unimplemented-features.md` です。末尾の Next Logical Step は作成時点の履歴として扱い、現在の作業判断では正本を優先してください。
 
 ## Snapshot
-- Phase D 完了 pass (2026-04-17 2nd): M-C06 の preview mode badge、M-C07 onion skin、M-C09 UI 言語切替を追加。Phase D コア UX (M-C01〜M-C07, M-C09, M-C10) が達成済み、**M-C08 (diff overlay) は deferred 維持のみ**。目視確認は未実施。
+- **Phase D 全 10 項目達成 (2026-04-17 3rd pass)**: M-C08 diff overlay も実装 (Shift+M で全 visible + export_enabled track の resolve_for_render 結果を canvas に半透明マゼンタで重ねる)。コード実装は Phase D 完了。次は Tauri ウィンドウでの目視レビュー。
+- Phase D 完了 pass (2026-04-17 2nd): M-C06 の preview mode badge、M-C07 onion skin、M-C09 UI 言語切替を追加。
 - Phase D 集中 pass (2026-04-17): M-C02 / M-C04 / M-C05 / M-C10 を追加実装し、M-C06 の legend を拡張、M-C08 の deferred 判定を再確認。
 - Phase D 更新: 2026-04-16 に M-C01 (`polygon track 作成`) を実装。frontend で `Shift+N` と `+ 多角形` を追加し、backend の既存 `create-track(shape_type="polygon")` 契約へ接続した。
 - Phase D 着手: 2026-04-17 に M-C03 (`export_enabled`) を実装。MaskTrack / export / update-track / TrackDetailPanel / TimelineView / MosaicPreviewCanvas に反映し、`visible` と独立して「書き出し対象外」を扱える。
@@ -25,6 +26,36 @@
   - `python -m pytest tests/test_domain_track.py -k "held_segments_do_not_hide_detector_keyframe_span"` passed
   - `python -m pytest tests/test_mask_continuity.py -k "held_segment_does_not_hide_accepted_detector_keyframes"` passed
 - Current desktop build status on April 16, 2026: `npm.cmd run build` in `apps/desktop` passed.
+
+## What Was Added In This Pass (April 17, 2026 3rd — Phase D: M-C08 diff overlay → Phase D 全完)
+
+### スコープ
+`feature_list` 3-4 (差分オーバーレイ) を受けて deferred 判定を解除、M-C08 を実装。これで Phase D のコア編集 UX は 10/10 達成。
+
+### Frontend
+- `apps/desktop/src/App.tsx`
+  - `diffOverlayEnabled` state、keydown の `Shift+M` トグル (小文字 `m` はモザイクプレビューのトグルにも追加)
+  - `diffOverlayShapes` を useMemo で計算 (全 `track.visible && track.export_enabled` の track に対して `resolveForRender(track, currentFrame)` を適用)
+  - CanvasStagePanel に新規 props `diffOverlayEnabled` / `diffOverlayShapes` を渡す
+  - preview info bar に `差分 ON/OFF` トグルボタンを追加
+- `apps/desktop/src/components/CanvasStagePanel.tsx`
+  - 新規 helper `renderDiffShape(keyframe, trackId)` (ellipse/polygon 両対応、rotation 反映)
+  - `.canvas-stage__diff-svg` オーバーレイ layer を onion skin layer の直後に配置 (z-index: 3)
+- `apps/desktop/src/components/ShortcutHelpModal.tsx`
+  - 「プレビュー」カテゴリを新設: `M` モザイクトグル、`Shift+M` 差分オーバーレイトグル
+- `apps/desktop/src/styles.css`: `.canvas-stage__diff-svg` と `.canvas-stage__diff-shape` (マゼンタ半透明 fill + 破線 stroke) を追加
+
+### 検証
+- `npm.cmd run build` → passed
+- `npm.cmd run check:mojibake` → passed
+- バックエンド変更なしのため backend テストは省略
+
+### 次ステップ
+- **Tauri ウィンドウでの目視レビュー**: Phase D の 10 項目すべてを実機で確認
+  - polygon 作成 / ellipse 回転 / export_enabled / transport 速度 & Home/End / shortcut help / mode badge / onion skin / diff overlay / 言語切替 / inspector 折りたたみ
+- 目視で問題が出たらフォローアップ、OK なら Phase A (recovery / review safety) へ進む
+
+---
 
 ## What Was Added In This Pass (April 17, 2026 — Phase D: M-C06 full / M-C07 / M-C09)
 

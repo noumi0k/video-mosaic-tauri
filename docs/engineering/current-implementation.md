@@ -214,8 +214,7 @@ Cancel は request-based。
 - regression prevention
   - Tauri E2E
   - recovery / export output verification
-- editing UX completion
-  - diff overlay (M-C08 deferred 維持、次フェーズで再評価)
+- editing UX completion — **全項目完了 (M-C01〜M-C10)。目視レビュー待ち**
 - future feature track
   - AI detect performance tuning
   - contour follow

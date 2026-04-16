@@ -53,6 +53,13 @@ const SHORTCUT_GROUPS: ShortcutGroup[] = [
     ],
   },
   {
+    title: "プレビュー",
+    entries: [
+      { keys: "M", description: "モザイクプレビューのトグル" },
+      { keys: "Shift+M", description: "差分オーバーレイのトグル (モザイク適用領域)" },
+    ],
+  },
+  {
     title: "範囲指定",
     entries: [
       { keys: "I", description: "イン点を設定" },
