@@ -17,7 +17,7 @@
 | Phase | 目的 | 状態 |
 | --- | --- | --- |
 | A | Persistent workflow completion (recovery / review safety) | 完了 (M-A01〜M-A04) |
-| B | Export workflow completion (queue / preset) | 未着手 |
+| B | Export workflow completion (queue / preset) | 部分完了 (M-B01/B02/B05 完了、M-B03/B04 残) |
 | C | Regression & verification (Tauri E2E / output verify) | 未着手 |
 | **D** | **Editing UX completion (M-C01〜M-C10)** | **コード実装完了、目視レビュー待ち** |
 | E | AI / data / distribution | 未着手 |

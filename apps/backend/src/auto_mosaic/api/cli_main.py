@@ -47,6 +47,11 @@ COMMAND_MODULES: dict[str, str] = {
     "save-recovery-snapshot": "save_recovery_snapshot",
     "list-recovery-snapshots": "list_recovery_snapshots",
     "delete-recovery-snapshot": "delete_recovery_snapshot",
+    "list-export-queue": "list_export_queue",
+    "enqueue-export": "enqueue_export",
+    "update-export-queue-item": "update_export_queue_item",
+    "remove-export-queue-item": "remove_export_queue_item",
+    "clear-terminal-export-queue": "clear_terminal_export_queue",
 }
 COMMAND_HANDLERS: dict[str, Callable[[dict], dict]] = {}
 

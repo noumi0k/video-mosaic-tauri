@@ -18,12 +18,14 @@ from auto_mosaic.api.commands import (
     cleanup_detect_jobs,
     cancel_export,
     cancel_runtime_job,
+    clear_terminal_export_queue,
     create_keyframe,
     create_project,
     create_track,
     delete_recovery_snapshot,
     detect_video,
     delete_keyframe,
+    enqueue_export,
     export_video,
     fetch_models,
     get_detect_result,
@@ -32,14 +34,17 @@ from auto_mosaic.api.commands import (
     get_runtime_job_result,
     get_runtime_job_status,
     list_detect_jobs,
+    list_export_queue,
     list_recovery_snapshots,
     load_project,
     move_keyframe,
     open_video,
+    remove_export_queue_item,
     save_project,
     save_recovery_snapshot,
     start_detect_job,
     start_runtime_job,
+    update_export_queue_item,
     update_keyframe,
     update_track,
 )
@@ -2730,6 +2735,81 @@ def test_recovery_snapshot_rejects_invalid_id(tmp_path, monkeypatch):
     )
     assert response["ok"] is False
     assert response["error"]["code"] == "SNAPSHOT_ID_INVALID"
+
+
+def test_export_queue_enqueue_update_remove_roundtrip(tmp_path, monkeypatch):
+    monkeypatch.setenv("AUTO_MOSAIC_DATA_DIR", str(tmp_path))
+    enq = enqueue_export.run(
+        {
+            "queue_id": "q-1",
+            "job_id": "",
+            "project_path": "C:/fake/demo.autoproj",
+            "project_name": "demo",
+            "output_path": "C:/fake/demo-export.mp4",
+            "options": {"mosaic_strength": 12, "audio_mode": "mux_if_possible"},
+        }
+    )
+    assert enq["ok"] is True
+    assert enq["data"]["item"]["state"] == "queued"
+
+    listed = list_export_queue.run({})
+    assert listed["ok"] is True
+    assert [item["queue_id"] for item in listed["data"]["items"]] == ["q-1"]
+
+    update = update_export_queue_item.run(
+        {"queue_id": "q-1", "patch": {"state": "running", "progress": 42.5, "job_id": "export-xyz"}}
+    )
+    assert update["ok"] is True
+    assert update["data"]["item"]["state"] == "running"
+    assert update["data"]["item"]["progress"] == 42.5
+    assert update["data"]["item"]["job_id"] == "export-xyz"
+
+    removed = remove_export_queue_item.run({"queue_id": "q-1"})
+    assert removed["ok"] is True
+    assert removed["data"]["removed"] is True
+    assert removed["data"]["items"] == []
+
+
+def test_export_queue_running_items_restored_as_interrupted(tmp_path, monkeypatch):
+    monkeypatch.setenv("AUTO_MOSAIC_DATA_DIR", str(tmp_path))
+    enqueue_export.run(
+        {
+            "queue_id": "q-restore",
+            "project_path": "C:/fake/demo.autoproj",
+            "project_name": "demo",
+            "output_path": "C:/fake/demo-export.mp4",
+            "options": {"mosaic_strength": 12, "audio_mode": "mux_if_possible"},
+        }
+    )
+    update_export_queue_item.run({"queue_id": "q-restore", "patch": {"state": "running", "progress": 10.0}})
+
+    listed = list_export_queue.run({})
+    assert listed["ok"] is True
+    items = listed["data"]["items"]
+    assert len(items) == 1
+    assert items[0]["state"] == "interrupted"
+    assert listed["data"]["recovered_interrupted"] == 1
+
+
+def test_clear_terminal_export_queue_removes_only_terminal_items(tmp_path, monkeypatch):
+    monkeypatch.setenv("AUTO_MOSAIC_DATA_DIR", str(tmp_path))
+    for idx, state in enumerate(["queued", "completed", "failed", "cancelled"]):
+        enqueue_export.run(
+            {
+                "queue_id": f"q-{idx}",
+                "project_path": "C:/fake.autoproj",
+                "output_path": f"C:/fake-{idx}.mp4",
+                "options": {"mosaic_strength": 12, "audio_mode": "mux_if_possible"},
+            }
+        )
+        if state != "queued":
+            update_export_queue_item.run({"queue_id": f"q-{idx}", "patch": {"state": state}})
+
+    cleared = clear_terminal_export_queue.run({})
+    assert cleared["ok"] is True
+    assert cleared["data"]["removed"] == 3
+    remaining_ids = [item["queue_id"] for item in cleared["data"]["items"]]
+    assert remaining_ids == ["q-0"]
 
 
 def test_list_recovery_snapshots_reports_broken_entries(tmp_path, monkeypatch):

@@ -910,6 +910,80 @@ body,
   stroke: rgba(249, 115, 22, 0.9); /* orange = future */
 }
 
+/* Export queue panel (M-B05) */
+.nle-export-queue {
+  border-top: 1px solid var(--border);
+  padding: 8px 12px;
+  background: var(--bg);
+  font-size: 12px;
+}
+
+.nle-export-queue__header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.nle-export-queue__count {
+  padding: 1px 6px;
+  border-radius: 10px;
+  background: rgba(59, 130, 246, 0.25);
+  color: #bfdbfe;
+  font-size: 11px;
+}
+
+.nle-export-queue__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 4px;
+  max-height: 220px;
+  overflow-y: auto;
+}
+
+.nle-export-queue__item {
+  display: grid;
+  grid-template-columns: minmax(120px, 1fr) auto minmax(140px, 2fr) minmax(100px, 2fr) auto;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 6px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.nle-export-queue__item--running {
+  background: rgba(59, 130, 246, 0.18);
+}
+
+.nle-export-queue__item--completed {
+  background: rgba(34, 197, 94, 0.14);
+}
+
+.nle-export-queue__item--failed,
+.nle-export-queue__item--cancelled,
+.nle-export-queue__item--interrupted {
+  background: rgba(220, 38, 38, 0.14);
+}
+
+.nle-export-queue__state {
+  padding: 0 6px;
+  border-radius: 3px;
+  background: rgba(0, 0, 0, 0.35);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.nle-export-queue__output,
+.nle-export-queue__status {
+  color: var(--text-dim);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 /* Diff overlay — highlights the pixels that the mosaic will actually affect */
 .canvas-stage__diff-svg {
   position: absolute;

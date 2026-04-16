@@ -61,6 +61,8 @@ import type {
   KeyframeShapeType,
   DetectJobSummary,
   ExportJobStatus,
+  ExportQueueItem,
+  ExportQueueItemState,
   JobProgressView,
   Keyframe,
   MutationCommandData,
@@ -307,6 +309,8 @@ export function App() {
   const [exportCancelling, setExportCancelling] = useState(false);
   const [lastExportOutputPath, setLastExportOutputPath] = useState<string | null>(null);
   const [exportModalOpen, setExportModalOpen] = useState(false);
+  const [exportQueue, setExportQueue] = useState<ExportQueueItem[]>([]);
+  const [activeQueueId, setActiveQueueId] = useState<string | null>(null);
   const [shortcutModalOpen, setShortcutModalOpen] = useState(false);
   const inspectorEnvironment = usePersistedDetails("environment", true);
   const inspectorDetect = usePersistedDetails("detect", true);
@@ -1072,6 +1076,41 @@ export function App() {
     assertRawFilePathForBackend(projectPath, "export-video");
     assertRawFilePathForBackend(outputPath, "export-video");
 
+    const queueId = `q-${Date.now().toString(36)}-${Math.floor(Math.random() * 1e6).toString(36)}`;
+    const options = {
+      mosaic_strength: settings.mosaic_strength,
+      audio_mode: settings.audio_mode,
+    };
+    const enqueueResponse = await backend<{ item: ExportQueueItem; items: ExportQueueItem[] }>(
+      "enqueue-export",
+      {
+        queue_id: queueId,
+        project_path: projectPath,
+        project_name: project.name || "project",
+        output_path: outputPath,
+        options,
+      },
+    );
+    if (!enqueueResponse.ok) {
+      setErrorMessage(prettyError(enqueueResponse.error));
+      return;
+    }
+    setExportQueue(enqueueResponse.data.items);
+    setActivity(`書き出しキューに追加: ${project.name || "project"}`);
+    // Drive loop (useEffect) picks up the new queued item when active slot is free.
+  }
+
+  async function reloadExportQueue() {
+    const response = await backend<{ items: ExportQueueItem[]; recovered_interrupted: number }>(
+      "list-export-queue",
+      {},
+    );
+    if (!response.ok) return;
+    setExportQueue(response.data.items);
+  }
+
+  async function runQueueItem(item: ExportQueueItem) {
+    setActiveQueueId(item.queue_id);
     const jobId = createExportJobId();
     setActiveExportJobId(jobId);
     setExportStatus({
@@ -1080,31 +1119,55 @@ export function App() {
       message: uiText.export.preparing,
       frames_written: 0,
       total_frames: currentVideo?.frame_count ?? null,
-      audio_mode: DEFAULT_EXPORT_OPTIONS.audio_mode,
+      audio_mode: (item.options.audio_mode as ExportJobStatus["audio_mode"]) ?? null,
       audio_status: null,
-      output_path: outputPath,
+      output_path: item.output_path,
       warnings: [],
     });
     setExportCancelling(false);
-    setLastExportOutputPath(outputPath);
-    setActivity(uiText.activity.exportStarted);
+    setLastExportOutputPath(item.output_path);
+    setActivity(`書き出し開始: ${item.project_name}`);
+    await backend("update-export-queue-item", {
+      queue_id: item.queue_id,
+      patch: { state: "running", job_id: jobId, progress: 0, status_text: "書き出し中" },
+    });
+    await reloadExportQueue();
 
-    void backend<{ output_path: string; audio: string }>("export-video", {
-      project_path: projectPath,
-      output_path: outputPath,
+    const response = await backend<{ output_path: string; audio: string }>("export-video", {
+      project_path: item.project_path,
+      output_path: item.output_path,
       job_id: jobId,
       options: {
-        mosaic_strength: settings.mosaic_strength,
-        audio_mode: settings.audio_mode,
-        resolution: settings.resolution,
-        bitrate_kbps: settings.bitrate_kbps,
-        encoder: settings.encoder,
+        mosaic_strength: item.options.mosaic_strength,
+        audio_mode: item.options.audio_mode,
       },
-    }).then((response) => {
-      if (!response.ok) setErrorMessage(prettyError(response.error));
-      setActivity(response.ok ? uiText.activity.exportCompleted : uiText.activity.exportFailed);
     });
+
+    const finalState: ExportQueueItemState = response.ok ? "completed" : "failed";
+    await backend("update-export-queue-item", {
+      queue_id: item.queue_id,
+      patch: {
+        state: finalState,
+        progress: response.ok ? 100 : 0,
+        status_text: response.ok ? "完了" : prettyError(response.error),
+      },
+    });
+    if (!response.ok) {
+      setErrorMessage(prettyError(response.error));
+    }
+    setActivity(response.ok ? uiText.activity.exportCompleted : uiText.activity.exportFailed);
+    setActiveQueueId(null);
+    setActiveExportJobId(null);
+    await reloadExportQueue();
   }
+
+  // Queue drive loop: runs the next queued item whenever the active slot is free.
+  useEffect(() => {
+    if (activeQueueId) return;
+    const next = exportQueue.find((item) => item.state === "queued");
+    if (!next) return;
+    void runQueueItem(next);
+  }, [activeQueueId, exportQueue]);
 
   async function handleCancelJob(job: JobProgressView) {
     if (job.job_kind === "export") {
@@ -1448,6 +1511,10 @@ export function App() {
     } catch {
       localStorage.removeItem("auto-mosaic-recovery");
     }
+  }, []);
+
+  useEffect(() => {
+    void reloadExportQueue();
   }, []);
 
   useEffect(() => {
@@ -2224,6 +2291,63 @@ export function App() {
       </section>
 
       <JobPanel jobs={visibleJobPanelItems} onCancel={(job) => void handleCancelJob(job)} onDismiss={handleDismissJob} onOpenFolder={handleOpenFolder} />
+
+      {exportQueue.length > 0 ? (
+        <section className="nle-export-queue">
+          <header className="nle-export-queue__header">
+            <strong>書き出しキュー</strong>
+            <span className="nle-export-queue__count">{exportQueue.length}</span>
+            <button
+              className="nle-btn nle-btn--small"
+              onClick={async () => {
+                await backend("clear-terminal-export-queue", {});
+                await reloadExportQueue();
+              }}
+              title="完了・失敗・キャンセルを一括削除"
+            >
+              終了項目をクリア
+            </button>
+          </header>
+          <ul className="nle-export-queue__list">
+            {exportQueue.map((item) => (
+              <li
+                key={item.queue_id}
+                className={`nle-export-queue__item nle-export-queue__item--${item.state}`}
+              >
+                <span className="nle-export-queue__name">{item.project_name || "project"}</span>
+                <span className="nle-export-queue__state">{item.state}</span>
+                <span className="nle-export-queue__output" title={item.output_path}>
+                  {item.output_path.split(/[\\/]/).pop() ?? item.output_path}
+                </span>
+                <span className="nle-export-queue__status">{item.status_text}</span>
+                {(item.state === "queued" ||
+                  item.state === "interrupted" ||
+                  item.state === "completed" ||
+                  item.state === "failed" ||
+                  item.state === "cancelled") ? (
+                  <button
+                    className="nle-btn nle-btn--small"
+                    onClick={async () => {
+                      if (item.state === "interrupted") {
+                        await backend("update-export-queue-item", {
+                          queue_id: item.queue_id,
+                          patch: { state: "queued", status_text: "再実行待ち" },
+                        });
+                        await reloadExportQueue();
+                        return;
+                      }
+                      await backend("remove-export-queue-item", { queue_id: item.queue_id });
+                      await reloadExportQueue();
+                    }}
+                  >
+                    {item.state === "interrupted" ? "再実行" : "削除"}
+                  </button>
+                ) : null}
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
 
       {recoveryModalOpen && recoveryCandidates.length ? (
         <div className="guard-modal-backdrop" role="presentation">

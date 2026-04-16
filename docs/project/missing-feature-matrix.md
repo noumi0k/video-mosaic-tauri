@@ -37,6 +37,9 @@
 - [x] **M-A02** recovery fail-safe (snapshot_id validation / atomic write / broken list isolation) (2026-04-17)
 - [x] **M-A03** export 前 3 択 danger modal (review / export anyway / cancel) (2026-04-17)
 - [x] **M-A04** confirmed danger frames を recovery snapshot に永続化 (2026-04-17)
+- [x] **M-B01** file-backed export queue + frontend drive loop (2026-04-17)
+- [x] **M-B02** queue persistence と再起動時の interrupted 復元 (2026-04-17)
+- [x] **M-B05** export queue UI (state 色分け / 削除 / 再実行 / 一括クリア) (2026-04-17)
 - [x] **M-C01** manual polygon track 作成 (2026-04-16)
 - [x] **M-C02** ellipse 回転の UI / 描画 / patch 対応 (2026-04-17)
 - [x] **M-C03** track 単位の `export_enabled` フラグ / preview の破線 outline / timeline 斜線・バッジ (2026-04-17)
@@ -67,11 +70,11 @@
 
 | ID | ソース | 状態 | 不足内容 | 現状メモ | フェーズ |
 | --- | --- | --- | --- | --- | --- |
-| M-B01 | `feature_list` 14-1/14-2, `unique_features` 13 | missing | 複数 export job の逐次実行 | 現在は単一 export job を Job Panel で追うだけ | B |
-| M-B02 | `feature_list` 14-2, `unique_features` 13 | partial | export queue の永続化と再起動時の `interrupted` 復元 | 型と hydration helper はあるが、実際の queue 実装はない | B |
-| M-B03 | `feature_list` 13-3/13-4/13-5/13-6/13-7 | partial | export 設定を仕様書レベルまで広げる | 現状は `resolution` `mosaic_strength` `audio_mode` `bitrate_kbps` `encoder` のみ | B |
+| ~~M-B01~~ | `feature_list` 14-1/14-2, `unique_features` 13 | done | 複数 export job の逐次実行 | 2026-04-17 (5th): `user-data/export-queue/queue.json` 1 本に atomic write。frontend は useEffect drive loop で `queued` を順次 `running → completed/failed` へ遷移 | B |
+| ~~M-B02~~ | `feature_list` 14-2, `unique_features` 13 | done | export queue の永続化と再起動時の `interrupted` 復元 | 2026-04-17 (5th): `list-export-queue` 呼び出し時に `running` を `interrupted` に自動変換し、UI に `再実行` ボタンで requeue | B |
+| M-B03 | `feature_list` 13-3/13-4/13-5/13-6/13-7 | partial | export 設定を仕様書レベルまで広げる | 現状は `resolution` `mosaic_strength` `audio_mode` `bitrate_kbps` `encoder` のみ (codec / container / FPS / quality 未対応) | B |
 | M-B04 | `feature_list` 13-9 | missing | user-defined export preset の保存 / 再利用 / 削除 | project には `export_preset` があるが、UI は単発設定のみ | B |
-| M-B05 | `feature_list` 14-1 | missing | queue UI と recent export results の整理 | Job Panel は進捗面であり queue/履歴面ではない | B |
+| ~~M-B05~~ | `feature_list` 14-1 | done | queue UI と recent export results の整理 | 2026-04-17 (5th): Job Panel の下に `.nle-export-queue` セクションを追加。state 別色分け + 削除 / 再実行 / 終了項目一括クリア | B |
 
 ### C. 編集体験の不足
 

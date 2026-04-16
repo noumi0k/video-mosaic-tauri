@@ -3,6 +3,7 @@
 > 位置づけ: このファイルは直近作業の handoff log です。現行実装の正本は `docs/engineering/current-implementation.md`、実装済み / 未実装 backlog の正本は `docs/project/unimplemented-features.md` です。末尾の Next Logical Step は作成時点の履歴として扱い、現在の作業判断では正本を優先してください。
 
 ## Snapshot
+- **Phase B core 完了 (2026-04-17 5th pass)**: export queue の file-backed 実装、frontend drive loop、queue UI を追加。残は M-B03 (settings 拡張) と M-B04 (preset)。
 - **Phase A 完了 (2026-04-17 4th pass)**: crash recovery を file-backed (`save/list/delete-recovery-snapshot`) に移行、3 択 danger modal、confirmed danger frames は recovery snapshot に保存。Phase B (export queue) へ進む準備が整った。
 - **Phase D 全 10 項目達成 (2026-04-17 3rd pass)**: M-C08 diff overlay も実装 (Shift+M で全 visible + export_enabled track の resolve_for_render 結果を canvas に半透明マゼンタで重ねる)。コード実装は Phase D 完了。次は Tauri ウィンドウでの目視レビュー。
 - Phase D 完了 pass (2026-04-17 2nd): M-C06 の preview mode badge、M-C07 onion skin、M-C09 UI 言語切替を追加。
@@ -27,6 +28,45 @@
   - `python -m pytest tests/test_domain_track.py -k "held_segments_do_not_hide_detector_keyframe_span"` passed
   - `python -m pytest tests/test_mask_continuity.py -k "held_segment_does_not_hide_accepted_detector_keyframes"` passed
 - Current desktop build status on April 16, 2026: `npm.cmd run build` in `apps/desktop` passed.
+
+## What Was Added In This Pass (April 17, 2026 5th — Phase B core: export queue + UI)
+
+### スコープ
+Phase B の core (M-B01 multi-job queue / M-B02 persistence & interrupted restore / M-B05 queue UI) を実装。M-B03 (settings breadth) と M-B04 (preset) は次パスに持ち越し。
+
+### Backend
+- 新 helper `_export_queue.py` に共通ロジック (list_queue / enqueue / update_item / remove_item / clear_terminal)
+- 個別 dispatcher 用の thin wrapper 5 本:
+  - `list_export_queue.py`、`enqueue_export.py`、`update_export_queue_item.py`、`remove_export_queue_item.py`、`clear_terminal_export_queue.py`
+- `cli_main.py` に上記 5 command を登録
+- Queue state は `user-data/export-queue/queue.json` の単一配列 JSON。atomic write で全件差し替え
+- `queue_id` は `[A-Za-z0-9._-]{1,128}` 必須
+- `list_queue` は `state == "running"` を `interrupted` に自動変換し、`recovered_interrupted` で件数を返す
+
+### Frontend
+- `App.tsx`
+  - `exportQueue` / `activeQueueId` state 追加、起動時に `list-export-queue` を実行
+  - `runExportWithSettings` は **enqueue に変更** し、実行は drive loop に委譲
+  - `runQueueItem` で `queued → running → completed/failed` の遷移と `export-video` 呼び出しをまとめて実行
+  - useEffect drive loop で `activeQueueId === null` && `queued` が存在する時に次を起動
+  - Job Panel の下に `.nle-export-queue` セクションを追加 (state 別 CSS、削除 / 再実行 / 終了項目一括クリア)
+- `styles.css` に `.nle-export-queue*` 系スタイルを追加
+
+### テスト
+- `test_cli_smoke.py` に 3 件追加:
+  - `test_export_queue_enqueue_update_remove_roundtrip`
+  - `test_export_queue_running_items_restored_as_interrupted`
+  - `test_clear_terminal_export_queue_removes_only_terminal_items`
+
+### 検証
+- `py -3.12 -m pytest tests/test_cli_smoke.py -k "export_queue or recovery_snapshot" -q --basetemp=...` → 6 passed
+- `npm.cmd run build` → passed
+
+### 残り (Phase B 内)
+- **M-B03**: video codec / container / fps / quality / audio 詳細の設定 UI と backend 分岐
+- **M-B04**: user-defined export preset の保存 / 読み込み / 削除
+
+---
 
 ## What Was Added In This Pass (April 17, 2026 4th — Phase A: persistent workflow completion)
 
