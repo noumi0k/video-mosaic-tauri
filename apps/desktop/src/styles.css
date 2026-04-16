@@ -1157,6 +1157,16 @@ body,
 }
 .nle-transport__btn:hover { background: var(--bg-hover); }
 .nle-transport__btn--play { font-size: 1.1em; padding: 2px 12px; }
+
+.nle-transport__speed {
+  margin-left: 6px;
+  padding: 2px 6px;
+  font-size: 12px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  color: var(--text);
+}
 .nle-transport__time {
   margin-left: 12px;
   font-size: 0.8em;
@@ -2213,6 +2223,38 @@ button {
 
 /* Export-disabled legend */
 .nle-tl-legend__item--export-disabled { color: #DC2626; }
+.nle-tl-legend__item--hidden-track { color: #6B7280; font-style: italic; }
+.nle-tl-legend__item--inactive-track { color: #9CA3AF; }
+
+/* Shortcut help modal table */
+.nle-shortcut-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.nle-shortcut-table td {
+  padding: 4px 6px;
+  border-bottom: 1px solid var(--border);
+  vertical-align: top;
+  font-size: 12px;
+}
+
+.nle-shortcut-table__keys {
+  white-space: nowrap;
+  width: 38%;
+}
+
+.nle-shortcut-table__keys code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  background: rgba(255, 255, 255, 0.06);
+  padding: 1px 6px;
+  border-radius: 3px;
+  font-size: 11px;
+}
+
+.nle-shortcut-table__desc {
+  color: var(--text-dim);
+}
 
 /* ============================================================
    DETECT MODAL (AI検出設定)

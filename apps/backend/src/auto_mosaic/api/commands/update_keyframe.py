@@ -71,6 +71,19 @@ def run(payload: dict) -> dict:
                 {"track_id": track_id, "frame_index": frame_index_int, "field": "points"},
             )
         keyframe.points = [[float(item) for item in point] for point in patch["points"]]
+    if "rotation" in patch:
+        try:
+            rotation_value = float(patch["rotation"])
+        except (TypeError, ValueError):
+            return failure(
+                "update-keyframe",
+                "INVALID_KEYFRAME_PATCH",
+                "rotation must be a number in degrees.",
+                {"track_id": track_id, "frame_index": frame_index_int, "field": "rotation"},
+            )
+        # Normalise to (-180, 180] so interpolation stays on the shortest arc.
+        rotation_value = ((rotation_value + 180.0) % 360.0) - 180.0
+        keyframe.rotation = rotation_value
 
     shape_error = validate_shape_payload(keyframe.shape_type, keyframe.bbox, keyframe.points)
     if shape_error:
@@ -81,7 +94,7 @@ def run(payload: dict) -> dict:
             {"track_id": track_id, "frame_index": frame_index_int, "field": "shape"},
         )
 
-    if any(field in patch for field in ("shape_type", "bbox", "points")):
+    if any(field in patch for field in ("shape_type", "bbox", "points", "rotation")):
         track.mark_user_edited(keyframe)
 
     track.keyframes.sort(key=lambda item: item.frame_index)

@@ -1,6 +1,6 @@
 # 実装ロードマップ
 
-最終更新: 2026-04-17
+最終更新: 2026-04-17 (Phase D 集中 pass)
 
 この文書は、[missing-feature-matrix.md](./missing-feature-matrix.md) を実装順に並べ替えたロードマップです。
 機能差分の正本は `missing-feature-matrix.md`、不変条件の正本は [../engineering/current-implementation.md](../engineering/current-implementation.md) を参照してください。
@@ -18,16 +18,22 @@
 [missing-feature-matrix.md](./missing-feature-matrix.md) と
 [ai-handoff.md](./ai-handoff.md) を参照。
 
-- [x] **M-C03** `export_enabled` フラグ (Phase D / 2026-04-17)
-  - backend: `MaskTrack.export_enabled`、export path の skip、`update-track` patch
-  - frontend: TrackDetailPanel トグル、TimelineView 斜線+バッジ、MosaicPreviewCanvas の破線 outline
-  - 検証: backend 追加テスト (domain / export / roundtrip) と `npm run build` / `check:mojibake` が通過
-  - 未実施: Tauri ウィンドウでの目視確認
 - [x] **M-C01** polygon track 作成 (Phase D / 2026-04-16)
-  - backend contract: 既存 `create-track(shape_type)` をそのまま使用し、polygon 作成 smoke test を追加
-  - frontend: `Shift+N`、ヘッダーの `+ 多角形` ボタン、初期矩形 polygon payload を追加
-  - 検証: `python -m pytest tests\\test_cli_smoke.py -k "create_track_"`、`node --test --experimental-strip-types tests/manualTrackFactory.test.ts`、`npm run build`
-  - 未実施: Tauri ウィンドウでの多角形 track 作成の目視確認
+  - `Shift+N` / ヘッダーの `+ 多角形` / 初期矩形 polygon payload
+- [x] **M-C02** ellipse 回転 UI (Phase D / 2026-04-17)
+  - backend: `update-keyframe` で `rotation` patch 対応 (±180 正規化)、export の `cv2.ellipse` に angle を渡す
+  - frontend: KeyframeDetailPanel に回転スライダー、MosaicPreviewCanvas と CanvasStagePanel の ellipse に rotation を反映
+- [x] **M-C03** `export_enabled` フラグ (Phase D / 2026-04-17)
+  - backend: domain / export skip / `update-track` patch
+  - frontend: TrackDetailPanel toggle、TimelineView の斜線+バッジ、MosaicPreviewCanvas の破線 outline
+- [x] **M-C04** 再生速度 / transport jump (Phase D / 2026-04-17)
+  - transport bar に `0.25x〜4x` セレクタ、`Home` / `End` キーバインド
+- [x] **M-C05** shortcut help modal (Phase D / 2026-04-17)
+  - `ShortcutHelpModal` コンポーネントで F1 alert を置き換え、カテゴリ別テーブル
+- [x] **M-C10** inspector 折りたたみ永続化 (Phase D / 2026-04-17)
+  - `usePersistedDetails` hook で `<details>` 開閉状態を localStorage に保存
+
+Phase D 残り: `M-C06` (preview mode badge はまだ未着手、legend は拡張済み)、`M-C07` onion skin、`M-C08` diff overlay は deferred 維持で再評価、`M-C09` UI 言語切替。いずれも Tauri ウィンドウでの目視確認は未実施。
 
 ## 2. Phase A: Persistent Workflow Completion
 
@@ -107,15 +113,15 @@
 
 対象:
 - [x] `M-C01` polygon track 作成 (2026-04-16 達成)
-- [ ] `M-C02` ellipse 回転 UI
+- [x] `M-C02` ellipse 回転 UI (2026-04-17 達成)
 - [x] `M-C03` `export_enabled` (2026-04-17 達成)
-- [ ] `M-C04` playback speed / transport jump
-- [ ] `M-C05` shortcut help modal と未接続 shortcut
-- [ ] `M-C06` mode badge / legend / state visualization
+- [x] `M-C04` playback speed / transport jump (2026-04-17 達成)
+- [x] `M-C05` shortcut help modal (2026-04-17 達成)
+- [ ] `M-C06` mode badge / legend / state visualization (legend 拡張のみ、preview badge 未着手)
 - [ ] `M-C07` onion skin
-- [ ] `M-C08` diff overlay (`deferred` の再評価)
+- [ ] `M-C08` diff overlay (2026-04-17 再評価: deferred 維持)
 - [ ] `M-C09` UI 言語切替
-- [ ] `M-C10` inspector 折りたたみ
+- [x] `M-C10` inspector 折りたたみ (2026-04-17 達成)
 
 検証:
 - canvas / timeline / inspector の一連操作

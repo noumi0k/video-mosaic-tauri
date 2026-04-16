@@ -1,6 +1,8 @@
 import type { CreateKeyframePayload, Keyframe, KeyframeShapeType } from "./types";
 
-export type InspectorPayload = Omit<CreateKeyframePayload, "project_path" | "track_id">;
+export type InspectorPayload = Omit<CreateKeyframePayload, "project_path" | "track_id"> & {
+  rotation: number;
+};
 
 export type KeyframeInspectorState = {
   shapeType: KeyframeShapeType;
@@ -8,12 +10,14 @@ export type KeyframeInspectorState = {
   frameIndexText: string;
   bboxText: string;
   pointsText: string;
+  rotationText: string;
 };
 
 export type KeyframeInspectorFieldErrors = {
   frameIndex?: string;
   bbox?: string;
   points?: string;
+  rotation?: string;
 };
 
 export type ParsedInspectorInput =
@@ -33,6 +37,7 @@ export function buildInspectorState(
       keyframeDocument !== null
         ? JSON.stringify(keyframeDocument.points)
         : "[[0.25, 0.25], [0.45, 0.25], [0.45, 0.45], [0.25, 0.45]]",
+    rotationText: String(keyframeDocument?.rotation ?? 0),
   };
 }
 
@@ -84,6 +89,17 @@ export function parseInspectorInput(
     ];
   }
 
+  const rotationTrimmed = state.rotationText.trim();
+  const rotationRaw = rotationTrimmed === "" ? 0 : Number(rotationTrimmed);
+  if (!Number.isFinite(rotationRaw)) {
+    return {
+      error: "回転は数値 (度) で入力してください。",
+      fieldErrors: { rotation: "-180〜180 の範囲で入力してください。" },
+    };
+  }
+  // Normalise to (-180, 180] — matches backend _lerp_rotation convention.
+  const rotation = ((rotationRaw + 180) % 360 + 360) % 360 - 180;
+
   return {
     fieldErrors: {},
     value: {
@@ -92,6 +108,7 @@ export function parseInspectorInput(
       shape_type: state.shapeType,
       bbox,
       points,
+      rotation,
     },
   };
 }

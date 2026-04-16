@@ -77,6 +77,7 @@ export function KeyframeDetailPanel({
       ...(patch.frameIndexText !== undefined ? { frameIndex: undefined } : {}),
       ...(patch.bboxText !== undefined ? { bbox: undefined } : {}),
       ...(patch.pointsText !== undefined ? { points: undefined } : {}),
+      ...(patch.rotationText !== undefined ? { rotation: undefined } : {}),
     }));
   }
 
@@ -115,8 +116,8 @@ export function KeyframeDetailPanel({
     setLocalError("");
     setFieldErrors({});
     try {
-      const { source, shape_type, bbox, points } = parsed.value!;
-      await onSaveKeyframe({ source, shape_type, bbox, points });
+      const { source, shape_type, bbox, points, rotation } = parsed.value!;
+      await onSaveKeyframe({ source, shape_type, bbox, points, rotation });
     } finally {
       setSaving(false);
     }
@@ -185,6 +186,37 @@ export function KeyframeDetailPanel({
               onChange={(event) => updateForm({ pointsText: event.target.value })}
             />
             {fieldErrors.points ? <span className="nle-field__error">{fieldErrors.points}</span> : null}
+          </div>
+        ) : null}
+        {formState.shapeType === "ellipse" ? (
+          <div className="nle-field">
+            <span className="nle-field__label">回転 (度)</span>
+            <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+              <input
+                className="nle-field__input"
+                type="range"
+                min={-180}
+                max={180}
+                step={1}
+                disabled={disabled}
+                value={Number(formState.rotationText) || 0}
+                onChange={(event) => updateForm({ rotationText: event.target.value })}
+                style={{ flex: 1 }}
+              />
+              <input
+                className="nle-field__input"
+                type="number"
+                min={-180}
+                max={180}
+                step={1}
+                disabled={disabled}
+                value={formState.rotationText}
+                onChange={(event) => updateForm({ rotationText: event.target.value })}
+                style={{ width: 72 }}
+              />
+            </div>
+            {fieldErrors.rotation ? <span className="nle-field__error">{fieldErrors.rotation}</span> : null}
+            {!fieldErrors.rotation ? <span className="nle-field__hint">-180〜180 度 (時計回り正)</span> : null}
           </div>
         ) : null}
         {localError ? <p className="nle-inspector-error">{localError}</p> : null}

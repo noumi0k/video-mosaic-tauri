@@ -5,6 +5,8 @@ import { message as tauriMessage, open, save } from "@tauri-apps/plugin-dialog";
 import { CanvasStagePanel } from "./components/CanvasStagePanel";
 import { DetectorSettingsModal } from "./components/DetectorSettingsModal";
 import { ExportSettingsModal, type ExportSettings } from "./components/ExportSettingsModal";
+import { ShortcutHelpModal } from "./components/ShortcutHelpModal";
+import { usePersistedDetails } from "./hooks/usePersistedDetails";
 import { JobPanel } from "./components/JobPanel";
 import { MosaicPreviewCanvas } from "./components/MosaicPreviewCanvas";
 import { KeyframeDetailPanel } from "./components/KeyframeDetailPanel";
@@ -293,6 +295,12 @@ export function App() {
   const [exportCancelling, setExportCancelling] = useState(false);
   const [lastExportOutputPath, setLastExportOutputPath] = useState<string | null>(null);
   const [exportModalOpen, setExportModalOpen] = useState(false);
+  const [shortcutModalOpen, setShortcutModalOpen] = useState(false);
+  const inspectorEnvironment = usePersistedDetails("environment", true);
+  const inspectorDetect = usePersistedDetails("detect", true);
+  const inspectorExport = usePersistedDetails("export", true);
+  const inspectorTrackDetail = usePersistedDetails("track-detail", true);
+  const inspectorKeyframeDetail = usePersistedDetails("keyframe-detail", true);
   const [exportSettings, setExportSettings] = useState<ExportSettings>({
     resolution: "source",
     mosaic_strength: 12,
@@ -333,6 +341,7 @@ export function App() {
 
   // 動画プレーヤー ref（再生位置同期用）
   const videoRef = useRef<HTMLVideoElement>(null);
+  const [playbackRate, setPlaybackRate] = useState<number>(1);
 
   // Detector settings modal state
   const [detectModalOpen, setDetectModalOpen] = useState(false);
@@ -1101,6 +1110,12 @@ export function App() {
     void runDoctor();
   }, []);
 
+  useEffect(() => {
+    if (videoRef.current) {
+      videoRef.current.playbackRate = playbackRate;
+    }
+  }, [playbackRate, project?.video?.source_path]);
+
   // Keep refs in sync so the close handler always sees current state.
   useEffect(() => { detectJobsRef.current = detectJobs; }, [detectJobs]);
   useEffect(() => { projectRef.current = project; }, [project]);
@@ -1179,6 +1194,20 @@ export function App() {
       // The following shortcuts require an active project.
       if (!project) return;
 
+      // Home/End: jump to first/last frame
+      if (e.key === "Home") {
+        e.preventDefault();
+        setCurrentFrame(0);
+        handleSeekFrame(0);
+        return;
+      }
+      if (e.key === "End") {
+        e.preventDefault();
+        const last = Math.max(0, (currentVideo?.frame_count ?? 1) - 1);
+        setCurrentFrame(last);
+        handleSeekFrame(last);
+        return;
+      }
       // Arrow Left/Right: ±1 frame (Shift: ±10)
       if (e.key === "ArrowLeft") {
         e.preventDefault();
@@ -1276,28 +1305,7 @@ export function App() {
       // F1: Show keyboard shortcuts
       if (e.key === "F1") {
         e.preventDefault();
-        window.alert(
-          "キーボードショートカット一覧\n" +
-          "──────────────────────\n" +
-          "Ctrl+Z: 元に戻す\n" +
-          "Ctrl+Shift+Z / Ctrl+Y: やり直す\n" +
-          "Ctrl+S: 保存\n" +
-          "Ctrl+Shift+S: 名前を付けて保存\n" +
-          "Ctrl+D: キーフレームを複製\n" +
-          "Ctrl+Shift+D: 現在フレームを検出\n" +
-          "← / →: ±1 フレーム (Shift: ±10)\n" +
-          "Space: 再生 / 一時停止\n" +
-          "K: キーフレーム追加\n" +
-          "Shift+K: キーフレーム削除\n" +
-          "[ / ]: 前 / 次のキーフレーム\n" +
-          "H: トラック表示切替\n" +
-          "N: 楕円トラック追加\n" +
-          "Shift+N: 多角形トラック追加\n" +
-          "I: イン点を設定\n" +
-          "O: アウト点を設定\n" +
-          "Delete: トラック削除\n" +
-          "F1: このヘルプ"
-        );
+        setShortcutModalOpen(true);
         return;
       }
     }
@@ -1906,7 +1914,7 @@ export function App() {
 
       <aside className="nle-right">
         <div className="nle-right__scroll">
-          <details className="nle-inspector-section" open>
+          <details className="nle-inspector-section" open={inspectorEnvironment.open} onToggle={inspectorEnvironment.onToggle}>
             <summary className="nle-inspector-section__header">{uiText.panels.environment}</summary>
             <div className="nle-inspector-section__body">
               <div className="nle-meta-row"><span className="nle-meta-row__label">ffmpeg</span><span className="nle-meta-row__value">{doctor?.ffmpeg?.found ? uiText.states.ready : uiText.states.missing}</span></div>
@@ -1915,7 +1923,7 @@ export function App() {
               <div className="nle-meta-row"><span className="nle-meta-row__label">ONNX Runtime</span><span className="nle-meta-row__value">{doctor?.onnxruntime?.version ?? "--"}</span></div>
             </div>
           </details>
-          <details className="nle-inspector-section" open>
+          <details className="nle-inspector-section" open={inspectorDetect.open} onToggle={inspectorDetect.onToggle}>
             <summary className="nle-inspector-section__header">{uiText.panels.detect}</summary>
             <div className="nle-inspector-section__body">
               {activeDetectJob ? (
@@ -1929,7 +1937,7 @@ export function App() {
               )}
             </div>
           </details>
-          <details className="nle-inspector-section" open>
+          <details className="nle-inspector-section" open={inspectorExport.open} onToggle={inspectorExport.onToggle}>
             <summary className="nle-inspector-section__header">{uiText.panels.export}</summary>
             <div className="nle-inspector-section__body">
               {exportStatus ? (
@@ -1944,7 +1952,7 @@ export function App() {
               )}
             </div>
           </details>
-          <details className="nle-inspector-section" open>
+          <details className="nle-inspector-section" open={inspectorTrackDetail.open} onToggle={inspectorTrackDetail.onToggle}>
             <summary className="nle-inspector-section__header">{uiText.panels.trackDetail}</summary>
             <div className="nle-inspector-section__body">
               <TrackDetailPanel
@@ -1964,7 +1972,7 @@ export function App() {
               />
             </div>
           </details>
-          <details className="nle-inspector-section" open>
+          <details className="nle-inspector-section" open={inspectorKeyframeDetail.open} onToggle={inspectorKeyframeDetail.onToggle}>
             <summary className="nle-inspector-section__header">{uiText.panels.keyframeDetail}</summary>
             <div className="nle-inspector-section__body">
               <KeyframeDetailPanel
@@ -1994,6 +2002,20 @@ export function App() {
         </button>
         <button className="nle-transport__btn" onClick={() => { const max = (currentVideo?.frame_count ?? 1) - 1; const f = Math.min(max, currentFrame + 1); setCurrentFrame(f); handleSeekFrame(f); }} title="1フレーム送る">⏩</button>
         <button className="nle-transport__btn" onClick={() => { const last = (currentVideo?.frame_count ?? 1) - 1; setCurrentFrame(last); handleSeekFrame(last); }} title="末尾へ">⏭</button>
+        <select
+          className="nle-transport__speed"
+          value={playbackRate}
+          onChange={(e) => setPlaybackRate(Number(e.target.value))}
+          title="再生速度"
+          aria-label="再生速度"
+        >
+          <option value={0.25}>0.25x</option>
+          <option value={0.5}>0.5x</option>
+          <option value={1}>1x</option>
+          <option value={1.5}>1.5x</option>
+          <option value={2}>2x</option>
+          <option value={4}>4x</option>
+        </select>
         <span className="nle-transport__time">F{currentFrame}{currentVideo?.fps ? ` / ${(currentFrame / currentVideo.fps).toFixed(2)}s` : ""}</span>
       </div>
 
@@ -2118,6 +2140,8 @@ export function App() {
         onExport={(s) => void handleExportWithSettings(s)}
         defaultSettings={exportSettings}
       />
+
+      <ShortcutHelpModal open={shortcutModalOpen} onClose={() => setShortcutModalOpen(false)} />
 
       {/* 全体検出前の上書き確認モーダル */}
       {overwriteConfirmOpen && overwriteConfirmInfo && (

@@ -98,6 +98,8 @@ Renderable segment state:
 `resolve_active_keyframe(frame_index)` は export 用で、renderable span の外では `None` を返す。
 `resolve_shape_for_editing(frame_index)` は編集用で、最初の keyframe 以後なら検出範囲外でも直近 shape を返せる。
 
+Keyframe には `rotation` (度、±180 正規化) がある。ellipse の回転は `cv2.ellipse(angle)` と `ctx.ellipse(rotation_rad)` に反映され、`_lerp_rotation` で最短路補間される。
+
 ## 7. 検出
 
 Backend command は `detect-video`, `start-detect-job`, `run-detect-job`, `get-detect-status`, `get-detect-result`, `cancel-detect-job`, `list-detect-jobs`, `cleanup-detect-jobs` を持つ。
@@ -213,8 +215,10 @@ Cancel は request-based。
   - Tauri E2E
   - recovery / export output verification
 - editing UX completion
-  - ellipse 回転
-  - transport / shortcut / state visualization の拡張
+  - preview operation mode badge (M-C06 partial)
+  - onion skin (M-C07)
+  - UI 言語切替 (M-C09)
+  - diff overlay (M-C08 deferred 維持、再評価は Phase D 完了後)
 - future feature track
   - AI detect performance tuning
   - contour follow

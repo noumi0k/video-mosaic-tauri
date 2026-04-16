@@ -371,6 +371,8 @@ export function TimelineView({
         <span className="nle-tl-legend__item nle-tl-legend__item--seg-uncertain">uncertain</span>
         <span className="nle-tl-legend__item nle-tl-legend__item--seg-interpolated">補間</span>
         <span className="nle-tl-legend__separator">状態:</span>
+        <span className="nle-tl-legend__item nle-tl-legend__item--hidden-track">非表示</span>
+        <span className="nle-tl-legend__item nle-tl-legend__item--inactive-track">再生範囲外</span>
         <span className="nle-tl-legend__item nle-tl-legend__item--export-disabled">書き出し外</span>
       </div>
     </div>

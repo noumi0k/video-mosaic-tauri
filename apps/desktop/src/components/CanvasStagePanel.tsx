@@ -405,7 +405,14 @@ export function CanvasStagePanel({
             }}
             onPointerDown={isEditableEllipse ? beginMove : undefined}
           >
-            <div className="canvas-stage__ellipse" />
+            <div
+              className="canvas-stage__ellipse"
+              style={
+                isEditableEllipse && keyframeDocument?.rotation
+                  ? { transform: `rotate(${keyframeDocument.rotation}deg)` }
+                  : undefined
+              }
+            />
             {isEditableEllipse ? (
               <>
                 <button className="canvas-stage__handle canvas-stage__handle--nw" onPointerDown={(event) => beginResize("nw", event)} />

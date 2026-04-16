@@ -1534,6 +1534,47 @@ def test_update_keyframe_roundtrip():
     }
 
 
+def test_update_keyframe_rotation_roundtrip_and_normalisation():
+    project_path = TEST_ROOT / "update-keyframe-rotation.json"
+    _write_mutation_project(project_path)
+    response = update_keyframe.run(
+        {
+            "project_path": str(project_path),
+            "track_id": "track-main",
+            "frame_index": 10,
+            "patch": {"rotation": 45.0},
+        }
+    )
+    assert response["ok"] is True
+    loaded = load_project.run({"project_path": str(project_path)})
+    assert loaded["data"]["project"]["tracks"][0]["keyframes"][0]["rotation"] == 45.0
+
+    # Values outside (-180, 180] are wrapped to the equivalent shortest-path angle.
+    wrap_response = update_keyframe.run(
+        {
+            "project_path": str(project_path),
+            "track_id": "track-main",
+            "frame_index": 10,
+            "patch": {"rotation": 270.0},
+        }
+    )
+    assert wrap_response["ok"] is True
+    wrapped = load_project.run({"project_path": str(project_path)})
+    assert wrapped["data"]["project"]["tracks"][0]["keyframes"][0]["rotation"] == -90.0
+
+    invalid = update_keyframe.run(
+        {
+            "project_path": str(project_path),
+            "track_id": "track-main",
+            "frame_index": 10,
+            "patch": {"rotation": "not-a-number"},
+        }
+    )
+    assert invalid["ok"] is False
+    assert invalid["error"]["code"] == "INVALID_KEYFRAME_PATCH"
+    assert invalid["error"]["details"]["field"] == "rotation"
+
+
 def test_move_keyframe_roundtrip():
     project_path = TEST_ROOT / "move-keyframe.json"
     _write_mutation_project(project_path)

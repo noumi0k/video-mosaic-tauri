@@ -297,7 +297,7 @@ export type UpdateKeyframePayload = {
   project_path: string;
   track_id: string;
   frame_index: number;
-  patch: Partial<Pick<Keyframe, "source" | "shape_type" | "bbox" | "points">>;
+  patch: Partial<Pick<Keyframe, "source" | "shape_type" | "bbox" | "points" | "rotation">>;
 };
 
 export type DeleteKeyframePayload = {

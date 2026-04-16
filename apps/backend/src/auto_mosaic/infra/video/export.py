@@ -236,7 +236,7 @@ def _build_shape_mask(frame_shape: tuple[int, ...], keyframe: Keyframe) -> np.nd
         x, y, w, h = _normalized_bbox(keyframe.bbox, width, height)
         center = (x + (w // 2), y + (h // 2))
         axes = (max(w // 2, 1), max(h // 2, 1))
-        cv2.ellipse(mask, center, axes, 0.0, 0.0, 360.0, 255, thickness=-1)
+        cv2.ellipse(mask, center, axes, float(keyframe.rotation), 0.0, 360.0, 255, thickness=-1)
     else:
         points = np.array([_normalized_point(point, width, height) for point in keyframe.points], dtype=np.int32)
         if len(points) >= 3:

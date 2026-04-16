@@ -63,7 +63,8 @@ function drawMosaicRegion(
     const centerY = (keyframe.bbox[1]! + keyframe.bbox[3]! / 2) * height;
     const radiusX = (keyframe.bbox[2]! / 2) * width;
     const radiusY = (keyframe.bbox[3]! / 2) * height;
-    ctx.ellipse(centerX, centerY, radiusX, radiusY, 0, 0, Math.PI * 2);
+    const rotationRad = ((keyframe.rotation ?? 0) * Math.PI) / 180;
+    ctx.ellipse(centerX, centerY, radiusX, radiusY, rotationRad, 0, Math.PI * 2);
   } else {
     const firstPoint = keyframe.points[0]!;
     ctx.moveTo(firstPoint[0]! * width, firstPoint[1]! * height);
@@ -102,7 +103,8 @@ function drawOutlineOnly(
     const centerY = (keyframe.bbox[1]! + keyframe.bbox[3]! / 2) * height;
     const radiusX = (keyframe.bbox[2]! / 2) * width;
     const radiusY = (keyframe.bbox[3]! / 2) * height;
-    ctx.ellipse(centerX, centerY, radiusX, radiusY, 0, 0, Math.PI * 2);
+    const rotationRad = ((keyframe.rotation ?? 0) * Math.PI) / 180;
+    ctx.ellipse(centerX, centerY, radiusX, radiusY, rotationRad, 0, Math.PI * 2);
   } else if (keyframe.shape_type === "polygon") {
     if (!keyframe.points || keyframe.points.length < 3) {
       ctx.restore();

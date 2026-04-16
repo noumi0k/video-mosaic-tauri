@@ -1,6 +1,6 @@
 # 不足機能マトリクス
 
-最終更新: 2026-04-17
+最終更新: 2026-04-17 (Phase D 集中 pass)
 
 この文書は、追加された仕様書 [../feature_list.md](../feature_list.md) と [../unique_features.md](../unique_features.md) を基準に、現行 Tauri 実装でまだ不足している機能を整理した差分一覧です。
 
@@ -33,7 +33,12 @@
 
 機能追加フェーズ以降に達成済みの項目 (履歴として残す):
 
+- [x] **M-C01** manual polygon track 作成 (2026-04-16)
+- [x] **M-C02** ellipse 回転の UI / 描画 / patch 対応 (2026-04-17)
 - [x] **M-C03** track 単位の `export_enabled` フラグ / preview の破線 outline / timeline 斜線・バッジ (2026-04-17)
+- [x] **M-C04** 再生速度セレクタ (0.25x〜4x) と Home/End シーク (2026-04-17)
+- [x] **M-C05** shortcut help modal (F1) (2026-04-17)
+- [x] **M-C10** inspector 折りたたみ状態の localStorage 永続化 (2026-04-17)
 
 この文書では、上記に対してまだ不足している機能だけを列挙する。
 
@@ -63,15 +68,15 @@
 | ID | ソース | 状態 | 不足内容 | 現状メモ | フェーズ |
 | --- | --- | --- | --- | --- | --- |
 | ~~M-C01~~ | `feature_list` 6-2 | done | 手動 polygon track 作成の正式導線 | 2026-04-16: ヘッダーに `+ 多角形`、`Shift+N`、初期矩形 polygon 作成を追加 | D |
-| M-C02 | `feature_list` 7-4 | missing | ellipse 回転の UI | data model と補間はあるが、操作導線がない | D |
+| ~~M-C02~~ | `feature_list` 7-4 | done | ellipse 回転の UI | 2026-04-17: keyframe inspector にスライダー/数値入力、canvas ellipse に transform:rotate、export の `cv2.ellipse(angle)` と preview `ctx.ellipse(rotation)` に反映、update-keyframe patch で rotation 受け入れ | D |
 | ~~M-C03~~ | `feature_list` 6-8, `unique_features` 7 | done | `export_enabled` フラグと preview/timeline 上の対象外表示 | 2026-04-17 実装: domain / export / update-track / TrackDetailPanel / Timeline / Preview (破線 outline) に反映 | D |
-| M-C04 | `feature_list` 4-2/4-4/4-5, 17 | partial | 再生速度変更と transport shortcut の拡張 | play/pause と左右 step はあるが、速度変更や Home/End 系がない | D |
-| M-C05 | `feature_list` 17, 19 | partial | shortcut help を専用 modal 化し、未実装 shortcut を揃える | F1 は `window.alert`、`Ctrl+M` `Ctrl+E` など未接続 | D |
-| M-C06 | `feature_list` 3-5, `unique_features` 16 | partial | preview mode badge、timeline legend、lost/inactive 可視化の整理 | 一部 badge はあるが、仕様書どおりの操作モード表示ではない | D |
+| ~~M-C04~~ | `feature_list` 4-2/4-4/4-5, 17 | done | 再生速度変更と transport shortcut の拡張 | 2026-04-17: transport bar に 0.25x〜4x 速度セレクタ、Home/End を keydown / shortcut help に追加 | D |
+| ~~M-C05~~ | `feature_list` 17, 19 | done | shortcut help を専用 modal 化 | 2026-04-17: `ShortcutHelpModal` を導入、F1 は window.alert から modal に置換、カテゴリ別テーブル表示。未接続 `Ctrl+M` `Ctrl+E` は採否判断保留 | D |
+| M-C06 | `feature_list` 3-5, `unique_features` 16 | partial | preview mode badge、timeline legend、lost/inactive 可視化の整理 | 2026-04-17: timeline legend に `非表示` / `再生範囲外` / `書き出し外` 項目追加。preview 上の operation mode badge は未着手 | D |
 | M-C07 | `project checklist` D-09, `pyside6-ui-structure-reference` | missing | onion skin | 既存 backlog には残っているが、現行 Tauri には未実装 | D |
-| M-C08 | `feature_list` 3-4 | deferred | diff overlay | 仕様上はあるが、現行完成条件では後段 | D |
+| M-C08 | `feature_list` 3-4 | deferred | diff overlay | 仕様上はあるが、現行完成条件では後段 (2026-04-17 再評価: Phase D の他項目達成後に改めて判断。当面 deferred 維持) | D |
 | M-C09 | `feature_list` 18-1 | missing | 日本語 / 英語の UI 言語切替 | `uiText` はあるが多言語切替は未実装 | D |
-| M-C10 | `feature_list` 19-3 | missing | property panel の折りたたみセクション | 現在の detail panel は固定展開のみ | D |
+| ~~M-C10~~ | `feature_list` 19-3 | done | property panel の折りたたみセクション | 2026-04-17: `usePersistedDetails` hook を導入し、5 つの inspector section の開閉状態を localStorage に永続化 | D |
 
 ### D. AI 検出 / モデル管理の不足
 
