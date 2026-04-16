@@ -1,6 +1,6 @@
 # 不足機能マトリクス
 
-最終更新: 2026-04-17 (Phase D 集中 pass)
+最終更新: 2026-04-17 (Phase D 完了 pass)
 
 この文書は、追加された仕様書 [../feature_list.md](../feature_list.md) と [../unique_features.md](../unique_features.md) を基準に、現行 Tauri 実装でまだ不足している機能を整理した差分一覧です。
 
@@ -38,6 +38,9 @@
 - [x] **M-C03** track 単位の `export_enabled` フラグ / preview の破線 outline / timeline 斜線・バッジ (2026-04-17)
 - [x] **M-C04** 再生速度セレクタ (0.25x〜4x) と Home/End シーク (2026-04-17)
 - [x] **M-C05** shortcut help modal (F1) (2026-04-17)
+- [x] **M-C06** canvas mode badge (再生状態 / モザイク / 選択トラック) (2026-04-17)
+- [x] **M-C07** onion skin オーバーレイ (前後 explicit keyframe の破線表示) (2026-04-17)
+- [x] **M-C09** UI 言語切替 (ja / en) ヘッダートグル + localStorage (2026-04-17)
 - [x] **M-C10** inspector 折りたたみ状態の localStorage 永続化 (2026-04-17)
 
 この文書では、上記に対してまだ不足している機能だけを列挙する。
@@ -72,10 +75,10 @@
 | ~~M-C03~~ | `feature_list` 6-8, `unique_features` 7 | done | `export_enabled` フラグと preview/timeline 上の対象外表示 | 2026-04-17 実装: domain / export / update-track / TrackDetailPanel / Timeline / Preview (破線 outline) に反映 | D |
 | ~~M-C04~~ | `feature_list` 4-2/4-4/4-5, 17 | done | 再生速度変更と transport shortcut の拡張 | 2026-04-17: transport bar に 0.25x〜4x 速度セレクタ、Home/End を keydown / shortcut help に追加 | D |
 | ~~M-C05~~ | `feature_list` 17, 19 | done | shortcut help を専用 modal 化 | 2026-04-17: `ShortcutHelpModal` を導入、F1 は window.alert から modal に置換、カテゴリ別テーブル表示。未接続 `Ctrl+M` `Ctrl+E` は採否判断保留 | D |
-| M-C06 | `feature_list` 3-5, `unique_features` 16 | partial | preview mode badge、timeline legend、lost/inactive 可視化の整理 | 2026-04-17: timeline legend に `非表示` / `再生範囲外` / `書き出し外` 項目追加。preview 上の operation mode badge は未着手 | D |
-| M-C07 | `project checklist` D-09, `pyside6-ui-structure-reference` | missing | onion skin | 既存 backlog には残っているが、現行 Tauri には未実装 | D |
+| ~~M-C06~~ | `feature_list` 3-5, `unique_features` 16 | done | preview mode badge、timeline legend、lost/inactive 可視化 | 2026-04-17 (2nd): canvas 左上に再生状態 / モザイク / 選択トラック (`非表示` `書き出し外` `ロック` サブラベル) を示す mode badge を追加。timeline legend も拡張済み | D |
+| ~~M-C07~~ | `project checklist` D-09, `pyside6-ui-structure-reference` | done | onion skin | 2026-04-17 (2nd): 前後の explicit keyframe を canvas に SVG で重ね (前=青破線 / 次=橙破線)、preview バーの `オニオン ON/OFF` でトグル | D |
 | M-C08 | `feature_list` 3-4 | deferred | diff overlay | 仕様上はあるが、現行完成条件では後段 (2026-04-17 再評価: Phase D の他項目達成後に改めて判断。当面 deferred 維持) | D |
-| M-C09 | `feature_list` 18-1 | missing | 日本語 / 英語の UI 言語切替 | `uiText` はあるが多言語切替は未実装 | D |
+| ~~M-C09~~ | `feature_list` 18-1 | done | 日本語 / 英語の UI 言語切替 | 2026-04-17 (2nd): `uiText` を `UiText` 型化し `getUiText(lang)` を追加、英訳の完全辞書を導入。header に ja/EN 切替ボタン、設定は `auto-mosaic:language` localStorage に保存 | D |
 | ~~M-C10~~ | `feature_list` 19-3 | done | property panel の折りたたみセクション | 2026-04-17: `usePersistedDetails` hook を導入し、5 つの inspector section の開閉状態を localStorage に永続化 | D |
 
 ### D. AI 検出 / モデル管理の不足

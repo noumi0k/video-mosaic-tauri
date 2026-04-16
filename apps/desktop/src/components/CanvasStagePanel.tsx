@@ -41,6 +41,14 @@ type CanvasStagePanelProps = {
   resolvedReason?: ResolveReason | null;
   busy: boolean;
   remoteError: string;
+  isVideoPlaying?: boolean;
+  mosaicPreviewEnabled?: boolean;
+  playbackRate?: number;
+  onionSkinEnabled?: boolean;
+  /** Previous explicit keyframe (frame_index < currentFrame) of the selected track. */
+  onionSkinPrev?: Keyframe | null;
+  /** Next explicit keyframe (frame_index > currentFrame) of the selected track. */
+  onionSkinNext?: Keyframe | null;
   onPreviewKeyframeChange: (keyframe: Keyframe | null) => void;
   onClearRemoteError: () => void;
   onCommitKeyframePatch: (patch: UpdateKeyframePayload["patch"]) => Promise<boolean>;
@@ -48,6 +56,41 @@ type CanvasStagePanelProps = {
 
 function toPercent(value: number) {
   return `${Math.max(0, Math.min(value, 1)) * 100}%`;
+}
+
+function renderOnionShape(keyframe: Keyframe, variant: "prev" | "next") {
+  const className = `canvas-stage__onion-shape canvas-stage__onion-shape--${variant}`;
+  if (keyframe.shape_type === "ellipse" && keyframe.bbox?.length === 4) {
+    const cx = keyframe.bbox[0]! + keyframe.bbox[2]! / 2;
+    const cy = keyframe.bbox[1]! + keyframe.bbox[3]! / 2;
+    const rx = keyframe.bbox[2]! / 2;
+    const ry = keyframe.bbox[3]! / 2;
+    const rotation = keyframe.rotation ?? 0;
+    const transform = rotation ? `rotate(${rotation} ${cx} ${cy})` : undefined;
+    return (
+      <ellipse
+        key={`onion-${variant}-${keyframe.frame_index}`}
+        className={className}
+        cx={cx}
+        cy={cy}
+        rx={rx}
+        ry={ry}
+        transform={transform}
+        vectorEffect="non-scaling-stroke"
+      />
+    );
+  }
+  if (keyframe.shape_type === "polygon" && (keyframe.points?.length ?? 0) >= 3) {
+    return (
+      <polygon
+        key={`onion-${variant}-${keyframe.frame_index}`}
+        className={className}
+        points={keyframe.points.map((p) => `${p[0]},${p[1]}`).join(" ")}
+        vectorEffect="non-scaling-stroke"
+      />
+    );
+  }
+  return null;
 }
 
 export function CanvasStagePanel({
@@ -58,6 +101,12 @@ export function CanvasStagePanel({
   resolvedReason,
   busy,
   remoteError,
+  isVideoPlaying = false,
+  mosaicPreviewEnabled = false,
+  playbackRate = 1,
+  onionSkinEnabled = false,
+  onionSkinPrev = null,
+  onionSkinNext = null,
   onPreviewKeyframeChange,
   onClearRemoteError,
   onCommitKeyframePatch,
@@ -357,6 +406,46 @@ export function CanvasStagePanel({
         }}
       >
         <div className="canvas-stage__backdrop" />
+        {onionSkinEnabled && (onionSkinPrev || onionSkinNext) ? (
+          <svg
+            className="canvas-stage__onion-svg"
+            viewBox="0 0 1 1"
+            preserveAspectRatio="none"
+            aria-hidden="true"
+          >
+            {onionSkinPrev ? renderOnionShape(onionSkinPrev, "prev") : null}
+            {onionSkinNext ? renderOnionShape(onionSkinNext, "next") : null}
+          </svg>
+        ) : null}
+        {/* Operation mode badge — top-left */}
+        <div className="canvas-stage__mode-badge" aria-live="polite">
+          <span
+            className={`canvas-stage__mode-chip canvas-stage__mode-chip--${
+              isVideoPlaying ? "playing" : "paused"
+            }`}
+          >
+            {isVideoPlaying ? `再生中 ×${playbackRate}` : "停止中"}
+          </span>
+          <span
+            className={`canvas-stage__mode-chip canvas-stage__mode-chip--${
+              mosaicPreviewEnabled ? "mosaic-on" : "mosaic-off"
+            }`}
+          >
+            {mosaicPreviewEnabled ? "モザイク ON" : "モザイク OFF"}
+          </span>
+          {track ? (
+            <span className="canvas-stage__mode-chip canvas-stage__mode-chip--track">
+              {track.label}
+              {!track.visible && <span className="canvas-stage__mode-sub">非表示</span>}
+              {!track.export_enabled && <span className="canvas-stage__mode-sub">書き出し外</span>}
+              {track.user_locked && <span className="canvas-stage__mode-sub">ロック</span>}
+            </span>
+          ) : (
+            <span className="canvas-stage__mode-chip canvas-stage__mode-chip--no-track">
+              トラック未選択
+            </span>
+          )}
+        </div>
         {/* Resolve-state overlay badge — top-right, pointer-events:none inherited */}
         {keyframeDocument !== null && resolveOverlayLabel(resolvedReason, keyframeDocument.source_detail) !== null ? (
           <div className="canvas-stage__resolve-badge">

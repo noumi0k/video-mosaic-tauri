@@ -1,4 +1,136 @@
-export const uiText = {
+export type UiLanguage = "ja" | "en";
+
+export type UiText = {
+  app: {
+    title: string;
+    menu: string;
+    newProject: string;
+    openProject: string;
+    saveProject: string;
+    saveProjectAs: string;
+    backendReady: string;
+    backendNeedsSetup: string;
+  };
+  actions: {
+    openVideo: string;
+    setup: string;
+    fetchModels: string;
+    detect: string;
+    export: string;
+    cancel: string;
+    recheck: string;
+    checking: string;
+  };
+  activity: {
+    idle: string;
+    notice: string;
+    ready: string;
+    setupRecommended: string;
+    doctorFailed: string;
+    newProjectReady: string;
+    projectLoaded: string;
+    projectSaved: string;
+    videoReady: string;
+    detectStarted: string;
+    detectCompleted: string;
+    exportStarted: string;
+    exportCompleted: string;
+    exportFailed: string;
+    savingBeforeEdit: string;
+    savingBeforeExport: string;
+    jobStarted: (jobKind: string) => string;
+  };
+  panels: {
+    project: string;
+    models: string;
+    environment: string;
+    detect: string;
+    export: string;
+    timeline: string;
+    trackDetail: string;
+    keyframeDetail: string;
+  };
+  project: {
+    untitledName: string;
+    name: string;
+    path: string;
+    tracks: string;
+    state: string;
+    none: string;
+    unsaved: string;
+    dirty: string;
+    saved: string;
+  };
+  models: {
+    ready: string;
+    missing: string;
+    empty: string;
+  };
+  preview: {
+    emptyTitle: string;
+    emptyHint: string;
+    frames: string;
+    sourcePath: string;
+  };
+  detect: {
+    idle: string;
+  };
+  export: {
+    idle: string;
+    preparing: string;
+  };
+  timeline: {
+    empty: string;
+  };
+  states: {
+    ready: string;
+    missing: string;
+    cuda: string;
+    cpuFallback: string;
+  };
+  jobs: {
+    panelTitle: string;
+    stage: string;
+    progress: string;
+    indeterminate: string;
+    cancelling: string;
+    detectTitle: string;
+    exportTitle: string;
+  };
+  jobStages: {
+    queued: string;
+    starting: string;
+    cancelling: string;
+    cancelled: string;
+    completed: string;
+    failed: string;
+    runtime_dirs: string;
+    doctor: string;
+    ffmpeg: string;
+    gpu_probe: string;
+    model_check: string;
+    model_fetch: string;
+    downloading: string;
+    verifying: string;
+    metadata_probe: string;
+    preview_probe: string;
+    preview_init: string;
+    preparing: string;
+    loading_model: string;
+    probing_video: string;
+    sampling_frames: string;
+    running_inference: string;
+    building_tracks: string;
+    rendering_frames: string;
+    muxing_audio: string;
+    finalizing: string;
+  };
+  errors: {
+    saveBeforeExport: string;
+  };
+};
+
+const uiTextJa: UiText = {
   app: {
     title: "Auto Mosaic",
     menu: "File",
@@ -126,4 +258,141 @@ export const uiText = {
   errors: {
     saveBeforeExport: "書き出しの前にプロジェクトを保存してください。",
   },
-} as const;
+};
+
+const uiTextEn: UiText = {
+  app: {
+    title: "Auto Mosaic",
+    menu: "File",
+    newProject: "New Project",
+    openProject: "Open Project",
+    saveProject: "Save",
+    saveProjectAs: "Save As...",
+    backendReady: "Backend ready",
+    backendNeedsSetup: "Initial setup required",
+  },
+  actions: {
+    openVideo: "Open Video",
+    setup: "Run Initial Setup",
+    fetchModels: "Fetch Missing Models",
+    detect: "AI Detect",
+    export: "Export",
+    cancel: "Cancel",
+    recheck: "Re-check",
+    checking: "Checking...",
+  },
+  activity: {
+    idle: "Idle.",
+    notice: "Long-running progress is shown in the shared Job Panel.",
+    ready: "Initial environment check completed.",
+    setupRecommended: "Initial environment is incomplete. Run setup.",
+    doctorFailed: "Environment check failed.",
+    newProjectReady: "Created a new project.",
+    projectLoaded: "Loaded the project.",
+    projectSaved: "Saved the project.",
+    videoReady: "Loaded the video.",
+    detectStarted: "AI detection started.",
+    detectCompleted: "AI detection completed.",
+    exportStarted: "Export started.",
+    exportCompleted: "Export completed.",
+    exportFailed: "Export failed.",
+    savingBeforeEdit: "Saving project before edit...",
+    savingBeforeExport: "Saving project before export...",
+    jobStarted: (jobKind: string) => `Started ${jobKind}.`,
+  },
+  panels: {
+    project: "Project",
+    models: "Models",
+    environment: "Environment",
+    detect: "Detect Jobs",
+    export: "Export Jobs",
+    timeline: "Timeline",
+    trackDetail: "Track Detail",
+    keyframeDetail: "Keyframe Detail",
+  },
+  project: {
+    untitledName: "Untitled Project",
+    name: "Name",
+    path: "Path",
+    tracks: "Tracks",
+    state: "State",
+    none: "none",
+    unsaved: "unsaved",
+    dirty: "Unsaved changes",
+    saved: "Saved",
+  },
+  models: {
+    ready: "available",
+    missing: "missing",
+    empty: "Required model info not loaded yet.",
+  },
+  preview: {
+    emptyTitle: "Open a video to start preview",
+    emptyHint: "Non-ASCII paths are loaded under the UTF-8 contract.",
+    frames: "Frames",
+    sourcePath: "Source",
+  },
+  detect: {
+    idle: "No detect jobs.",
+  },
+  export: {
+    idle: "No export jobs.",
+    preparing: "Preparing export...",
+  },
+  timeline: {
+    empty: "No tracks yet.",
+  },
+  states: {
+    ready: "ready",
+    missing: "missing",
+    cuda: "CUDA available",
+    cpuFallback: "CPU fallback",
+  },
+  jobs: {
+    panelTitle: "Job progress",
+    stage: "Stage",
+    progress: "Progress",
+    indeterminate: "Acquiring progress",
+    cancelling: "Cancellation requested.",
+    detectTitle: "AI detection",
+    exportTitle: "Exporting video",
+  },
+  jobStages: {
+    queued: "Queued",
+    starting: "Starting",
+    cancelling: "Cancelling",
+    cancelled: "Cancelled",
+    completed: "Completed",
+    failed: "Failed",
+    runtime_dirs: "Checking runtime dirs",
+    doctor: "Checking environment",
+    ffmpeg: "Checking ffmpeg / ffprobe",
+    gpu_probe: "Probing GPU",
+    model_check: "Checking required models",
+    model_fetch: "Fetching missing models",
+    downloading: "Downloading",
+    verifying: "Verifying",
+    metadata_probe: "Probing video metadata",
+    preview_probe: "Preparing first frame",
+    preview_init: "Initializing preview",
+    preparing: "Preparing",
+    loading_model: "Loading detection model",
+    probing_video: "Probing video",
+    sampling_frames: "Sampling frames",
+    running_inference: "Running inference",
+    building_tracks: "Building tracks",
+    rendering_frames: "Rendering frames",
+    muxing_audio: "Muxing audio",
+    finalizing: "Finalizing",
+  },
+  errors: {
+    saveBeforeExport: "Save the project before exporting.",
+  },
+};
+
+export function getUiText(language: UiLanguage): UiText {
+  return language === "en" ? uiTextEn : uiTextJa;
+}
+
+/** Default export is the Japanese dictionary for backwards compatibility. */
+export const uiText: UiText = uiTextJa;

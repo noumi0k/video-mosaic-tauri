@@ -3,7 +3,8 @@
 > 位置づけ: このファイルは直近作業の handoff log です。現行実装の正本は `docs/engineering/current-implementation.md`、実装済み / 未実装 backlog の正本は `docs/project/unimplemented-features.md` です。末尾の Next Logical Step は作成時点の履歴として扱い、現在の作業判断では正本を優先してください。
 
 ## Snapshot
-- Phase D 集中 pass (2026-04-17): M-C02 / M-C04 / M-C05 / M-C10 を追加実装し、M-C06 の legend を拡張、M-C08 の deferred 判定を再確認。達成済みは **M-C01 / M-C02 / M-C03 / M-C04 / M-C05 / M-C10** の 6 項目。残は M-C06 (preview badge)、M-C07 (onion skin)、M-C08 (deferred)、M-C09 (i18n)。
+- Phase D 完了 pass (2026-04-17 2nd): M-C06 の preview mode badge、M-C07 onion skin、M-C09 UI 言語切替を追加。Phase D コア UX (M-C01〜M-C07, M-C09, M-C10) が達成済み、**M-C08 (diff overlay) は deferred 維持のみ**。目視確認は未実施。
+- Phase D 集中 pass (2026-04-17): M-C02 / M-C04 / M-C05 / M-C10 を追加実装し、M-C06 の legend を拡張、M-C08 の deferred 判定を再確認。
 - Phase D 更新: 2026-04-16 に M-C01 (`polygon track 作成`) を実装。frontend で `Shift+N` と `+ 多角形` を追加し、backend の既存 `create-track(shape_type="polygon")` 契約へ接続した。
 - Phase D 着手: 2026-04-17 に M-C03 (`export_enabled`) を実装。MaskTrack / export / update-track / TrackDetailPanel / TimelineView / MosaicPreviewCanvas に反映し、`visible` と独立して「書き出し対象外」を扱える。
 - Minimum flow (open video → detect → mask edit → export) was manually verified in the Tauri window on April 16, 2026.
@@ -24,6 +25,51 @@
   - `python -m pytest tests/test_domain_track.py -k "held_segments_do_not_hide_detector_keyframe_span"` passed
   - `python -m pytest tests/test_mask_continuity.py -k "held_segment_does_not_hide_accepted_detector_keyframes"` passed
 - Current desktop build status on April 16, 2026: `npm.cmd run build` in `apps/desktop` passed.
+
+## What Was Added In This Pass (April 17, 2026 — Phase D: M-C06 full / M-C07 / M-C09)
+
+### スコープ
+Phase D の残り (M-C06 preview badge / M-C07 onion skin / M-C09 UI 言語切替) を追加し、Phase D のコア UX をひとまず完了させる。M-C08 は deferred 維持で変更なし。
+
+### Frontend — M-C06 preview operation mode badge
+- `apps/desktop/src/components/CanvasStagePanel.tsx`
+  - 左上に `.canvas-stage__mode-badge` を新規配置し、再生状態 / モザイク ON/OFF / 選択トラック (label + `非表示` / `書き出し外` / `ロック` サブラベル) を表示
+  - 新規 props `isVideoPlaying`, `mosaicPreviewEnabled`, `playbackRate`
+- `apps/desktop/src/App.tsx`
+  - `isVideoPlaying` state を追加、`<video>` の `onPlay` / `onPause` / `onEnded` に同期
+  - CanvasStagePanel に新規 props を渡す
+- `apps/desktop/src/styles.css`: `.canvas-stage__mode-badge` と `.canvas-stage__mode-chip--*` バリアントを追加
+
+### Frontend — M-C07 onion skin
+- `apps/desktop/src/components/CanvasStagePanel.tsx`
+  - 新規 `renderOnionShape(keyframe, variant)` ヘルパーを追加 (ellipse/polygon 両対応、rotation 反映)
+  - `.canvas-stage__onion-svg` レイヤーを backdrop 直後に追加
+  - 新規 props `onionSkinEnabled`, `onionSkinPrev`, `onionSkinNext`
+- `apps/desktop/src/App.tsx`
+  - `onionSkinEnabled` state、`onionSkinKeyframes` (prev/next explicit keyframe) を useMemo で計算
+  - preview info bar に `オニオン ON/OFF` トグルボタン
+- `apps/desktop/src/styles.css`: `.canvas-stage__onion-svg` と `.canvas-stage__onion-shape--prev/next` を追加 (前=青破線 / 次=橙破線)
+
+### Frontend — M-C09 UI 言語切替
+- `apps/desktop/src/uiText.ts` を `UiText` 型 + `uiTextJa` + `uiTextEn` に再構成、`getUiText(lang)` ヘルパーを export (既存の `uiText` 定数も日本語辞書として互換維持)
+- `apps/desktop/src/App.tsx`
+  - `UiLanguage` state (初期値は `auto-mosaic:language` localStorage から) と永続化 effect
+  - `uiText = useMemo(() => getUiText(language), [language])` で動的切替
+  - header に日本語 / EN トグルボタンを追加
+- `apps/desktop/src/styles.css`: `.nle-header__lang` コンテナクラス
+- **クリーンアップ**: 古い `apps/desktop/src/uiText.js` (再エクスポートスタブ) を削除。rollup の拡張子解決で `.ts` より `.js` が優先されてしまい、新規 export `getUiText` が未発見になっていた
+
+### 検証
+- `npm.cmd run build` in `apps/desktop` → passed (M-C06 / M-C07 / M-C09 追加後の最終 build)
+- `npm.cmd run check:mojibake` → passed
+- バックエンドに触っていないので backend テストは省略
+
+### 未検証 / 残り
+- Tauri ウィンドウでの目視確認 (mode badge の色分け、onion skin の表示、言語切替時の UI 反映)
+- `M-C08` diff overlay は deferred のまま (Phase D 完了後の次段階で再評価)
+- onion skin は前後 1 frame ずつのみ。複数 frame 遡る / 透明度設定は未対応
+
+---
 
 ## What Was Added In This Pass (April 17, 2026 — Phase D: M-C02 / M-C04 / M-C05 / M-C10 + M-C06 partial / M-C08 re-eval)
 

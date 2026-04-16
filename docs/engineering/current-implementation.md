@@ -215,10 +215,7 @@ Cancel は request-based。
   - Tauri E2E
   - recovery / export output verification
 - editing UX completion
-  - preview operation mode badge (M-C06 partial)
-  - onion skin (M-C07)
-  - UI 言語切替 (M-C09)
-  - diff overlay (M-C08 deferred 維持、再評価は Phase D 完了後)
+  - diff overlay (M-C08 deferred 維持、次フェーズで再評価)
 - future feature track
   - AI detect performance tuning
   - contour follow

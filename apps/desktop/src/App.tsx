@@ -53,7 +53,7 @@ import {
 import { detectDangerousFrames, type DangerousFrame } from "./dangerousFrames";
 import { DangerWarningsPanel } from "./components/DangerWarningsPanel";
 import { assertRawFilePathForBackend } from "./pathUtils";
-import { uiText } from "./uiText";
+import { getUiText, type UiLanguage } from "./uiText";
 import type {
   CommandResponse,
   CreateKeyframePayload,
@@ -258,6 +258,24 @@ export function App() {
   const processedDetectJobsRef = useRef<Set<string>>(new Set());
   const collectingDetectJobsRef = useRef<Set<string>>(new Set());
 
+  const [language, setLanguage] = useState<UiLanguage>(() => {
+    try {
+      const stored = window.localStorage.getItem("auto-mosaic:language");
+      if (stored === "ja" || stored === "en") return stored;
+    } catch {
+      // ignore storage errors — falls back to default.
+    }
+    return "ja";
+  });
+  useEffect(() => {
+    try {
+      window.localStorage.setItem("auto-mosaic:language", language);
+    } catch {
+      // ignore
+    }
+  }, [language]);
+  const uiText = useMemo(() => getUiText(language), [language]);
+
   const [activity, setActivity] = useState<string>(uiText.activity.idle);
   const [errorMessage, setErrorMessage] = useState("");
   const [doctor, setDoctor] = useState<DoctorData | null>(null);
@@ -342,6 +360,8 @@ export function App() {
   // 動画プレーヤー ref（再生位置同期用）
   const videoRef = useRef<HTMLVideoElement>(null);
   const [playbackRate, setPlaybackRate] = useState<number>(1);
+  const [isVideoPlaying, setIsVideoPlaying] = useState<boolean>(false);
+  const [onionSkinEnabled, setOnionSkinEnabled] = useState<boolean>(false);
 
   // Detector settings modal state
   const [detectModalOpen, setDetectModalOpen] = useState(false);
@@ -1583,6 +1603,19 @@ export function App() {
   );
   const displayedKeyframeDocument = previewKeyframeOverride ?? resolvedKeyframeDocument;
   const suggestedCreateFrame = selectedKeyframeFrame ?? currentFrame;
+  const onionSkinKeyframes = useMemo(() => {
+    const keyframes = selectedTrackDocument?.keyframes ?? [];
+    let prev: typeof keyframes[number] | null = null;
+    let next: typeof keyframes[number] | null = null;
+    for (const kf of keyframes) {
+      if (kf.frame_index < currentFrame) {
+        if (!prev || kf.frame_index > prev.frame_index) prev = kf;
+      } else if (kf.frame_index > currentFrame) {
+        if (!next || kf.frame_index < next.frame_index) next = kf;
+      }
+    }
+    return { prev, next };
+  }, [selectedTrackDocument, currentFrame]);
   const activeRuntimeByKind = useMemo(() => {
     const index = new Map<RuntimeJobSummary["job_kind"], RuntimeJobSummary>();
     for (const job of Object.values(runtimeJobs)) {
@@ -1778,6 +1811,22 @@ export function App() {
           </div>
         )}
         <div className="nle-header__spacer" />
+        <div className="nle-header__lang" role="group" aria-label="UI language">
+          <button
+            className={`nle-btn nle-btn--small ${language === "ja" ? "nle-btn--accent" : ""}`}
+            onClick={() => setLanguage("ja")}
+            aria-pressed={language === "ja"}
+          >
+            日本語
+          </button>
+          <button
+            className={`nle-btn nle-btn--small ${language === "en" ? "nle-btn--accent" : ""}`}
+            onClick={() => setLanguage("en")}
+            aria-pressed={language === "en"}
+          >
+            EN
+          </button>
+        </div>
         <span className={`nle-header__badge ${startupReady ? "nle-header__badge--ready" : "nle-header__badge--warning"}`}>
           {startupReady ? uiText.app.backendReady : uiText.app.backendNeedsSetup}
         </span>
@@ -1872,6 +1921,9 @@ export function App() {
                   className={`nle-preview-stage__video${mosaicPreviewEnabled ? " nle-preview-stage__video--hidden" : ""}`}
                   src={previewSrc}
                   onTimeUpdate={handleVideoTimeUpdate}
+                  onPlay={() => setIsVideoPlaying(true)}
+                  onPause={() => setIsVideoPlaying(false)}
+                  onEnded={() => setIsVideoPlaying(false)}
                 />
                 {currentVideo && (
                   <MosaicPreviewCanvas
@@ -1891,6 +1943,12 @@ export function App() {
                   resolvedReason={resolvedReason}
                   busy={keyframeEditorBusy}
                   remoteError={keyframeRemoteError}
+                  isVideoPlaying={isVideoPlaying}
+                  mosaicPreviewEnabled={mosaicPreviewEnabled}
+                  playbackRate={playbackRate}
+                  onionSkinEnabled={onionSkinEnabled}
+                  onionSkinPrev={onionSkinKeyframes.prev}
+                  onionSkinNext={onionSkinKeyframes.next}
                   onPreviewKeyframeChange={setPreviewKeyframeOverride}
                   onClearRemoteError={() => setKeyframeRemoteError("")}
                   onCommitKeyframePatch={handleCommitKeyframePatch}
@@ -1906,6 +1964,13 @@ export function App() {
                 title={mosaicPreviewEnabled ? "モザイクプレビューを無効化" : "モザイクプレビューを有効化"}
               >
                 {mosaicPreviewEnabled ? "モザイク ON" : "モザイク OFF"}
+              </button>
+              <button
+                className={`nle-btn nle-btn--small nle-preview__onion-toggle${onionSkinEnabled ? " nle-preview__onion-toggle--active" : ""}`}
+                onClick={() => setOnionSkinEnabled((v) => !v)}
+                title={onionSkinEnabled ? "オニオンスキンを非表示" : "前後フレームのマスクを半透明で重ねる"}
+              >
+                {onionSkinEnabled ? "オニオン ON" : "オニオン OFF"}
               </button>
             </div>
           </>
