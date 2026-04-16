@@ -3,6 +3,7 @@
 > 位置づけ: このファイルは直近作業の handoff log です。現行実装の正本は `docs/engineering/current-implementation.md`、実装済み / 未実装 backlog の正本は `docs/project/unimplemented-features.md` です。末尾の Next Logical Step は作成時点の履歴として扱い、現在の作業判断では正本を優先してください。
 
 ## Snapshot
+- **Phase A 完了 (2026-04-17 4th pass)**: crash recovery を file-backed (`save/list/delete-recovery-snapshot`) に移行、3 択 danger modal、confirmed danger frames は recovery snapshot に保存。Phase B (export queue) へ進む準備が整った。
 - **Phase D 全 10 項目達成 (2026-04-17 3rd pass)**: M-C08 diff overlay も実装 (Shift+M で全 visible + export_enabled track の resolve_for_render 結果を canvas に半透明マゼンタで重ねる)。コード実装は Phase D 完了。次は Tauri ウィンドウでの目視レビュー。
 - Phase D 完了 pass (2026-04-17 2nd): M-C06 の preview mode badge、M-C07 onion skin、M-C09 UI 言語切替を追加。
 - Phase D 集中 pass (2026-04-17): M-C02 / M-C04 / M-C05 / M-C10 を追加実装し、M-C06 の legend を拡張、M-C08 の deferred 判定を再確認。
@@ -26,6 +27,43 @@
   - `python -m pytest tests/test_domain_track.py -k "held_segments_do_not_hide_detector_keyframe_span"` passed
   - `python -m pytest tests/test_mask_continuity.py -k "held_segment_does_not_hide_accepted_detector_keyframes"` passed
 - Current desktop build status on April 16, 2026: `npm.cmd run build` in `apps/desktop` passed.
+
+## What Was Added In This Pass (April 17, 2026 4th — Phase A: persistent workflow completion)
+
+### スコープ
+Phase A (M-A01〜M-A04) をまとめて完了。crash recovery を file-backed 化し、danger warning を 3 択 modal へ。confirmed danger state は recovery snapshot に寄せて project 本体は汚さない方針で固定。
+
+### Backend
+- `apps/backend/src/auto_mosaic/runtime/paths.py`: `RuntimeDirs` に `recovery_dir` / `export_queue_dir` / `preset_dir` を追加 (後続 Phase B で再利用予定)
+- `apps/backend/src/auto_mosaic/api/commands/save_recovery_snapshot.py` 新規: `user-data/recovery/{snapshot_id}.json` に atomic write。`snapshot_id` は `[A-Za-z0-9._-]{1,128}` のみ許可 (path traversal 防止)
+- `apps/backend/src/auto_mosaic/api/commands/list_recovery_snapshots.py` 新規: snapshot 一覧 + 壊れた JSON を `broken[]` に分離
+- `apps/backend/src/auto_mosaic/api/commands/delete_recovery_snapshot.py` 新規: 冪等 delete (既に無い snapshot は no-op 成功)
+- 上記を `cli_main.py` の dispatcher に登録
+- `save_recovery_snapshot` / `list_recovery_snapshots` は `confirmed_danger_frames: string[]` を永続化
+
+### Frontend
+- `apps/desktop/src/App.tsx`
+  - `loadRecoverySnapshots` / `saveRecoverySnapshot` / `removeRecoverySnapshot` を削除。代わりに `loadLegacyLocalStorageSnapshots` (migration 用) と `removeLegacyLocalStorageSnapshot` のみ残す
+  - autosave effect / debounce effect / close handler / restore effect の保存は全て `backend("save-recovery-snapshot", …)` / `backend("delete-recovery-snapshot", …)` に置換
+  - 起動時の recovery bootstrap で旧 localStorage entry を backend に push してから削除
+  - `RecoverySnapshot` 型に `confirmedDangerFrames?: string[]` を追加し、`restoreRecoverySnapshot` で復元
+  - 3 択 danger modal (`dangerReviewOpen` / `dangerReviewContext`) を実装。未確認 danger frame が残る場合のみ modal を開き、ボタンは `詳細を確認 (書き出し中断)` / `そのまま書き出し (全件確認済み)` / `キャンセル`
+  - `handleExportWithSettings` を modal 経由にし、実処理を `runExportWithSettings` に分離
+
+### テスト
+- `apps/backend/tests/test_cli_smoke.py`
+  - `test_recovery_snapshot_save_list_delete_roundtrip` (save → list → delete → empty list)
+  - `test_recovery_snapshot_rejects_invalid_id` (`../escape` で SNAPSHOT_ID_INVALID)
+  - `test_list_recovery_snapshots_reports_broken_entries` (不正 JSON が broken[] へ)
+
+### 検証
+- `py -3.12 -m pytest tests/test_cli_smoke.py -k "recovery_snapshot" -q --basetemp=...` → 3 passed (Windows の pytest tmpdir 問題を回避するため --basetemp を明示)
+- `npm.cmd run build` → passed
+
+### 次ステップ
+- Phase B (export queue) へ進む
+
+---
 
 ## What Was Added In This Pass (April 17, 2026 3rd — Phase D: M-C08 diff overlay → Phase D 全完)
 

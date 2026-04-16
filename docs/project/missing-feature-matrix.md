@@ -33,6 +33,10 @@
 
 機能追加フェーズ以降に達成済みの項目 (履歴として残す):
 
+- [x] **M-A01** file-backed crash recovery (backend snapshot commands + frontend migration) (2026-04-17)
+- [x] **M-A02** recovery fail-safe (snapshot_id validation / atomic write / broken list isolation) (2026-04-17)
+- [x] **M-A03** export 前 3 択 danger modal (review / export anyway / cancel) (2026-04-17)
+- [x] **M-A04** confirmed danger frames を recovery snapshot に永続化 (2026-04-17)
 - [x] **M-C01** manual polygon track 作成 (2026-04-16)
 - [x] **M-C02** ellipse 回転の UI / 描画 / patch 対応 (2026-04-17)
 - [x] **M-C03** track 単位の `export_enabled` フラグ / preview の破線 outline / timeline 斜線・バッジ (2026-04-17)
@@ -54,10 +58,10 @@
 
 | ID | ソース | 状態 | 不足内容 | 現状メモ | フェーズ |
 | --- | --- | --- | --- | --- | --- |
-| M-A01 | `feature_list` 16, `unique_features` 13 | partial | crash recovery を `localStorage` 依存から backend/file-backed に移す | 起動時の復元候補 UI はあるが、保存先は frontend ローカルのみ | A |
-| M-A02 | `feature_list` 16, `unique_features` 13 | partial | recovery データ破損時の fail-safe と interrupted job 復元を正式化する | export queue 本体が未実装のため、復旧対象が project snapshot に偏っている | A |
-| M-A03 | `feature_list` 13-10, `unique_features` 8 | partial | export 前 warning を 3 択の review/export/cancel 導線へする | 現在は `window.confirm` ベースで「そのまま export するか」だけ | A |
-| M-A04 | `feature_list` 13-10, `unique_features` 8 | partial | warning 確認済み状態を project/review session のどちらに持つかを固定する | `confirmedDangerFrames` は `App.tsx` のみで backend 永続化なし | A |
+| ~~M-A01~~ | `feature_list` 16, `unique_features` 13 | done | crash recovery を `localStorage` 依存から backend/file-backed に移す | 2026-04-17 (4th): `save-recovery-snapshot` / `list-recovery-snapshots` / `delete-recovery-snapshot` を実装し `user-data/recovery/` に JSON で保存。frontend は backend コール中心で localStorage は legacy migration 専用 | A |
+| ~~M-A02~~ | `feature_list` 16, `unique_features` 13 | done | recovery データ破損時の fail-safe と interrupted restore 方針 | 2026-04-17 (4th): snapshot_id の厳格 validation (SAFE_ID regex)、atomic write、list で壊れた JSON は `broken[]` に分離して skip。interrupted export restore は Phase B の queue 実装と合流予定 | A |
+| ~~M-A03~~ | `feature_list` 13-10, `unique_features` 8 | done | export 前 warning を 3 択の review/export/cancel 導線へ | 2026-04-17 (4th): `window.confirm` を撤去、未確認 danger frame がある時に「詳細を確認 / そのまま書き出し / キャンセル」の modal で処理分岐。詳細を確認 → 最初の対象フレームへ seek | A |
+| ~~M-A04~~ | `feature_list` 13-10, `unique_features` 8 | done | warning 確認済み状態の保存方針 | 2026-04-17 (4th): `confirmedDangerFrames` を recovery snapshot に `confirmed_danger_frames: string[]` として保存。起動時 / 手動復元時に state を復元。project ファイル本体は汚さない | A |
 
 ### B. Export workflow completion
 

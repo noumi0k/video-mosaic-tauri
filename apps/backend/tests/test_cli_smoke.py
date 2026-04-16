@@ -21,6 +21,7 @@ from auto_mosaic.api.commands import (
     create_keyframe,
     create_project,
     create_track,
+    delete_recovery_snapshot,
     detect_video,
     delete_keyframe,
     export_video,
@@ -31,10 +32,12 @@ from auto_mosaic.api.commands import (
     get_runtime_job_result,
     get_runtime_job_status,
     list_detect_jobs,
+    list_recovery_snapshots,
     load_project,
     move_keyframe,
     open_video,
     save_project,
+    save_recovery_snapshot,
     start_detect_job,
     start_runtime_job,
     update_keyframe,
@@ -2680,6 +2683,66 @@ def test_delete_keyframe_roundtrip():
     track_summary = loaded["data"]["read_model"]["track_summaries"][0]
     assert track_summary["keyframe_count"] == 0
     assert track_summary["keyframes"] == []
+
+
+def test_recovery_snapshot_save_list_delete_roundtrip(tmp_path, monkeypatch):
+    monkeypatch.setenv("AUTO_MOSAIC_DATA_DIR", str(tmp_path))
+    project_payload = {
+        "project_id": "demo",
+        "version": "0.1.0",
+        "schema_version": CURRENT_PROJECT_SCHEMA_VERSION,
+        "name": "recovery demo",
+        "project_path": None,
+        "video": None,
+        "tracks": [],
+        "detector_config": {},
+        "export_preset": {},
+        "paths": {},
+    }
+    save_response = save_recovery_snapshot.run(
+        {
+            "snapshot_id": "demo-1",
+            "project": project_payload,
+            "read_model": {"track_summaries": [], "track_count": 0},
+            "timestamp": "2026-04-17T10:00:00.000Z",
+        }
+    )
+    assert save_response["ok"] is True
+
+    list_response = list_recovery_snapshots.run({})
+    assert list_response["ok"] is True
+    ids = [snap["id"] for snap in list_response["data"]["snapshots"]]
+    assert "demo-1" in ids
+
+    delete_response = delete_recovery_snapshot.run({"snapshot_id": "demo-1"})
+    assert delete_response["ok"] is True
+    assert delete_response["data"]["deleted"] is True
+
+    after = list_recovery_snapshots.run({})
+    assert after["ok"] is True
+    assert [snap["id"] for snap in after["data"]["snapshots"]] == []
+
+
+def test_recovery_snapshot_rejects_invalid_id(tmp_path, monkeypatch):
+    monkeypatch.setenv("AUTO_MOSAIC_DATA_DIR", str(tmp_path))
+    response = save_recovery_snapshot.run(
+        {"snapshot_id": "../escape", "project": {"project_id": "x"}}
+    )
+    assert response["ok"] is False
+    assert response["error"]["code"] == "SNAPSHOT_ID_INVALID"
+
+
+def test_list_recovery_snapshots_reports_broken_entries(tmp_path, monkeypatch):
+    monkeypatch.setenv("AUTO_MOSAIC_DATA_DIR", str(tmp_path))
+    recovery_dir = Path(tmp_path) / "recovery"
+    recovery_dir.mkdir(parents=True, exist_ok=True)
+    (recovery_dir / "broken.json").write_text("not json", encoding="utf-8")
+
+    response = list_recovery_snapshots.run({})
+    assert response["ok"] is True
+    assert response["data"]["snapshots"] == []
+    assert len(response["data"]["broken"]) == 1
+    assert Path(response["data"]["broken"][0]["path"]).name == "broken.json"
 
 
 def test_update_track_roundtrip():

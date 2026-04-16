@@ -204,9 +204,10 @@ Cancel は request-based。
 
 現在残っている大きな領域は次。
 
-- persistent workflow completion
-  - file-backed recovery
-  - export 前 danger warning の正式 review 導線
+- persistent workflow completion — **完了 (2026-04-17)**
+  - file-backed recovery は `user-data/recovery/{id}.json` に移行、backend に `save/list/delete-recovery-snapshot` command あり
+  - export 前 danger modal (詳細確認 / 書き出し / キャンセル) で `window.confirm` を置換
+  - confirmed danger frames は recovery snapshot に保存 (project 本体は汚染しない)
 - export workflow completion
   - export queue
   - queue persistence / interrupted restore

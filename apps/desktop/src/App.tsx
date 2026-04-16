@@ -120,6 +120,8 @@ type RecoverySnapshot = {
   project: ProjectDocument;
   readModel: ProjectReadModel | null;
   timestamp: string;
+  /** Review session-level confirmed danger frame keys (`${trackId}-${frameIndex}`). */
+  confirmedDangerFrames?: string[];
 };
 
 const DEFAULT_EXPORT_OPTIONS = {
@@ -145,7 +147,8 @@ function recoveryStorageKey(id: string) {
   return `${RECOVERY_KEY_PREFIX}${id}`;
 }
 
-function loadRecoverySnapshots(): RecoverySnapshot[] {
+/** Legacy localStorage snapshots. New writes go through the backend; these are read once on startup and migrated. */
+function loadLegacyLocalStorageSnapshots(): RecoverySnapshot[] {
   const snapshots: RecoverySnapshot[] = [];
   const seen = new Set<string>();
 
@@ -191,17 +194,7 @@ function loadRecoverySnapshots(): RecoverySnapshot[] {
   return snapshots.sort((a, b) => Date.parse(b.timestamp) - Date.parse(a.timestamp));
 }
 
-function saveRecoverySnapshot(project: ProjectDocument, readModel: ProjectReadModel | null) {
-  const snapshot: RecoverySnapshot = {
-    id: recoverySnapshotId(project),
-    project,
-    readModel,
-    timestamp: new Date().toISOString(),
-  };
-  localStorage.setItem(recoveryStorageKey(snapshot.id), JSON.stringify(snapshot));
-}
-
-function removeRecoverySnapshot(id: string) {
+function removeLegacyLocalStorageSnapshot(id: string) {
   localStorage.removeItem(recoveryStorageKey(id));
   localStorage.removeItem(LEGACY_RECOVERY_KEY);
 }
@@ -340,6 +333,11 @@ export function App() {
   // 確認済み危険フレーム: key = `${trackId}-${frameIndex}`
   // DangerWarningsPanel と TimelineView が共有する。プロジェクト変更時にリセット。
   const [confirmedDangerFrames, setConfirmedDangerFrames] = useState<Set<string>>(new Set());
+  const [dangerReviewOpen, setDangerReviewOpen] = useState<boolean>(false);
+  const [dangerReviewContext, setDangerReviewContext] = useState<{
+    dangers: ReturnType<typeof detectDangerousFrames>;
+    settings: ExportSettings;
+  } | null>(null);
 
   // 全体検出前の上書き確認モーダル
   // resolve が null でない間はモーダルが開いている。
@@ -453,7 +451,7 @@ export function App() {
     setCurrentFrame(0);
     setPreviewKeyframeOverride(null);
     setKeyframeRemoteError("");
-    setConfirmedDangerFrames(new Set());
+    setConfirmedDangerFrames(new Set(snapshot.confirmedDangerFrames ?? []));
     setHistory(resetHistory(null));
     const sourcePath = snapshot.project.video?.source_path ?? null;
     if (sourcePath) {
@@ -470,8 +468,13 @@ export function App() {
     setActivity("前回のセッションを復元しました");
   }
 
-  function deleteRecoverySnapshot(snapshot: RecoverySnapshot) {
-    removeRecoverySnapshot(snapshot.id);
+  async function deleteRecoverySnapshot(snapshot: RecoverySnapshot) {
+    removeLegacyLocalStorageSnapshot(snapshot.id);
+    try {
+      await backend("delete-recovery-snapshot", { snapshot_id: snapshot.id });
+    } catch {
+      // ignore — user can retry; UI still removes the candidate below.
+    }
     setRecoveryCandidates((current) => {
       const next = current.filter((item) => item.id !== snapshot.id);
       if (!next.length) setRecoveryModalOpen(false);
@@ -1040,13 +1043,19 @@ export function App() {
     if (!project) return;
     // Pre-export safety check: warn about dangerous frames.
     const dangers = detectDangerousFrames(project);
-    if (dangers.length > 0) {
-      const summary = dangers.slice(0, 5).map((d) => `F${d.frameIndex}: ${d.reason} (${d.trackLabel})`).join("\n");
-      const extra = dangers.length > 5 ? `\n... and ${dangers.length - 5} more` : "";
-      if (!window.confirm(`${dangers.length} dangerous frame(s) detected:\n\n${summary}${extra}\n\nExport anyway?`)) {
-        return;
-      }
+    const unconfirmed = dangers.filter(
+      (d) => !confirmedDangerFrames.has(`${d.trackId}-${d.frameIndex}`),
+    );
+    if (unconfirmed.length > 0) {
+      setDangerReviewContext({ dangers: unconfirmed, settings });
+      setDangerReviewOpen(true);
+      return;
     }
+    await runExportWithSettings(settings);
+  }
+
+  async function runExportWithSettings(settings: ExportSettings) {
+    if (!project) return;
     // 常に最新編集を保存してからエクスポートする
     setActivity(uiText.activity.savingBeforeExport);
     const projectPath = await handleSaveProject(false);
@@ -1174,7 +1183,13 @@ export function App() {
           });
         }
 
-        saveRecoverySnapshot(proj, rm);
+        await backend("save-recovery-snapshot", {
+          snapshot_id: recoverySnapshotId(proj),
+          project: proj,
+          read_model: rm,
+          timestamp: new Date().toISOString(),
+          confirmed_danger_frames: Array.from(confirmedDangerFrames),
+        });
       }
 
       const activeJobs = Object.values(detectJobsRef.current).filter(
@@ -1347,7 +1362,7 @@ export function App() {
   });
 
   // Autosave: save to disk every 60 seconds when dirty and project has a path.
-  // Also stores a recovery snapshot in localStorage for crash recovery.
+  // Also stores a recovery snapshot via the backend for crash recovery.
   const autosaveTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   useEffect(() => {
     if (autosaveTimerRef.current) {
@@ -1356,9 +1371,13 @@ export function App() {
     }
     if (!project || !projectDirty) return;
     // Store recovery snapshot immediately on first dirty change.
-    try {
-      saveRecoverySnapshot(project, readModel);
-    } catch { /* localStorage quota exceeded — ignore */ }
+    void backend("save-recovery-snapshot", {
+      snapshot_id: recoverySnapshotId(project),
+      project,
+      read_model: readModel,
+      timestamp: new Date().toISOString(),
+      confirmed_danger_frames: Array.from(confirmedDangerFrames),
+    });
 
     if (!project.project_path) return;
     autosaveTimerRef.current = setInterval(() => {
@@ -1374,18 +1393,26 @@ export function App() {
   // Clear recovery snapshot after successful save.
   useEffect(() => {
     if (project && !projectDirty) {
-      removeRecoverySnapshot(recoverySnapshotId(project));
+      const id = recoverySnapshotId(project);
+      void backend("delete-recovery-snapshot", { snapshot_id: id });
+      removeLegacyLocalStorageSnapshot(id);
     }
   }, [project, projectDirty]);
 
-  // Debounced recovery snapshot: update localStorage when project content
+  // Debounced recovery snapshot: update backend store when project content
   // changes while dirty, so force-kill loses at most ~5 seconds of work.
   useEffect(() => {
     if (!project || !projectDirty) return;
     if (recoveryDebounceRef.current) clearTimeout(recoveryDebounceRef.current);
     recoveryDebounceRef.current = setTimeout(() => {
       recoveryDebounceRef.current = null;
-      try { saveRecoverySnapshot(project, readModel); } catch { /* quota — ignore */ }
+      void backend("save-recovery-snapshot", {
+        snapshot_id: recoverySnapshotId(project),
+        project,
+        read_model: readModel,
+        timestamp: new Date().toISOString(),
+        confirmed_danger_frames: Array.from(confirmedDangerFrames),
+      });
     }, 5_000);
     return () => {
       if (recoveryDebounceRef.current) {
@@ -1424,11 +1451,63 @@ export function App() {
   }, []);
 
   useEffect(() => {
-    const snapshots = loadRecoverySnapshots();
-    resetEditorToBlank();
-    if (!snapshots.length) return;
-    setRecoveryCandidates(snapshots);
-    setRecoveryModalOpen(true);
+    let cancelled = false;
+    async function bootstrapRecovery() {
+      resetEditorToBlank();
+      const merged = new Map<string, RecoverySnapshot>();
+      // Legacy localStorage snapshots — migrate into the backend store, then clear.
+      const legacySnapshots = loadLegacyLocalStorageSnapshots();
+      for (const snap of legacySnapshots) {
+        merged.set(snap.id, snap);
+        try {
+          await backend("save-recovery-snapshot", {
+            snapshot_id: snap.id,
+            project: snap.project,
+            read_model: snap.readModel,
+            timestamp: snap.timestamp,
+          });
+          removeLegacyLocalStorageSnapshot(snap.id);
+        } catch {
+          // leave the localStorage copy in place so it can be retried next launch
+        }
+      }
+      // Backend-authoritative snapshots.
+      try {
+        const response = await backend<{
+          snapshots: {
+            id: string;
+            project: ProjectDocument;
+            read_model: ProjectReadModel | null;
+            timestamp: string;
+            confirmed_danger_frames?: string[];
+          }[];
+        }>("list-recovery-snapshots", {});
+        if (response.ok) {
+          for (const snap of response.data.snapshots) {
+            merged.set(snap.id, {
+              id: snap.id,
+              project: snap.project,
+              readModel: snap.read_model ?? null,
+              timestamp: snap.timestamp || new Date().toISOString(),
+              confirmedDangerFrames: snap.confirmed_danger_frames ?? [],
+            });
+          }
+        }
+      } catch {
+        // ignore — backend unreachable; legacy list still surfaces if present
+      }
+      if (cancelled) return;
+      const ordered = Array.from(merged.values()).sort(
+        (a, b) => Date.parse(b.timestamp) - Date.parse(a.timestamp),
+      );
+      if (!ordered.length) return;
+      setRecoveryCandidates(ordered);
+      setRecoveryModalOpen(true);
+    }
+    void bootstrapRecovery();
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   useEffect(() => {
@@ -2241,6 +2320,80 @@ export function App() {
       />
 
       <ShortcutHelpModal open={shortcutModalOpen} onClose={() => setShortcutModalOpen(false)} />
+
+      {dangerReviewOpen && dangerReviewContext ? (
+        <div className="guard-modal-backdrop" role="presentation">
+          <section
+            className="guard-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="danger-review-title"
+          >
+            <h2 id="danger-review-title">書き出し前の要確認フレーム</h2>
+            <p className="guard-modal__body">
+              {dangerReviewContext.dangers.length} 件の未確認フレームがあります。内容を確認するか、そのまま書き出すかを選んでください。
+            </p>
+            <ul
+              className="guard-modal__list"
+              style={{ maxHeight: 160, overflowY: "auto", margin: "8px 0", paddingLeft: 16 }}
+            >
+              {dangerReviewContext.dangers.slice(0, 8).map((d) => (
+                <li key={`${d.trackId}-${d.frameIndex}`}>
+                  F{d.frameIndex} · {d.reason} · {d.trackLabel}
+                </li>
+              ))}
+              {dangerReviewContext.dangers.length > 8 ? (
+                <li>
+                  …他 {dangerReviewContext.dangers.length - 8} 件
+                </li>
+              ) : null}
+            </ul>
+            <div className="guard-modal__actions" style={{ flexDirection: "column", gap: 8 }}>
+              <button
+                className="nle-btn nle-btn--accent"
+                onClick={() => {
+                  const first = dangerReviewContext.dangers[0];
+                  setDangerReviewOpen(false);
+                  setDangerReviewContext(null);
+                  if (first) {
+                    setSelectedTrackId(first.trackId);
+                    setSelectedKeyframeFrame(first.frameIndex);
+                    handleSeekFrame(first.frameIndex);
+                  }
+                  setActivity("要確認フレームをレビュー中です。書き出しは中断しました。");
+                }}
+              >
+                詳細を確認 (書き出しを中断)
+              </button>
+              <button
+                className="nle-btn"
+                onClick={() => {
+                  const next = new Set(confirmedDangerFrames);
+                  for (const d of dangerReviewContext.dangers) {
+                    next.add(`${d.trackId}-${d.frameIndex}`);
+                  }
+                  setConfirmedDangerFrames(next);
+                  const settings = dangerReviewContext.settings;
+                  setDangerReviewOpen(false);
+                  setDangerReviewContext(null);
+                  void runExportWithSettings(settings);
+                }}
+              >
+                そのまま書き出し (全件確認済みにする)
+              </button>
+              <button
+                className="nle-btn"
+                onClick={() => {
+                  setDangerReviewOpen(false);
+                  setDangerReviewContext(null);
+                }}
+              >
+                キャンセル
+              </button>
+            </div>
+          </section>
+        </div>
+      ) : null}
 
       {/* 全体検出前の上書き確認モーダル */}
       {overwriteConfirmOpen && overwriteConfirmInfo && (

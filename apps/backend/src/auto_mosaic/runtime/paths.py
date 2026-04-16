@@ -17,6 +17,9 @@ class RuntimeDirs:
     training_dir: str
     project_dir: str
     model_dir: str
+    recovery_dir: str
+    export_queue_dir: str
+    preset_dir: str
 
 
 def ensure_runtime_dirs(overrides: dict | None = None) -> RuntimeDirs:
@@ -35,6 +38,9 @@ def ensure_runtime_dirs(overrides: dict | None = None) -> RuntimeDirs:
         training_dir=str(data_dir / "training"),
         project_dir=str(data_dir / "projects"),
         model_dir=str(overrides.get("model_dir") or os.environ.get("AUTO_MOSAIC_MODEL_DIR") or workspace_root / "models"),
+        recovery_dir=str(data_dir / "recovery"),
+        export_queue_dir=str(data_dir / "export-queue"),
+        preset_dir=str(data_dir / "presets"),
     )
 
     for path in asdict(runtime).values():

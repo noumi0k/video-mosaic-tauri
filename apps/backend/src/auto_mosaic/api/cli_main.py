@@ -44,6 +44,9 @@ COMMAND_MODULES: dict[str, str] = {
     "update-keyframe": "update_keyframe",
     "delete-keyframe": "delete_keyframe",
     "update-track": "update_track",
+    "save-recovery-snapshot": "save_recovery_snapshot",
+    "list-recovery-snapshots": "list_recovery_snapshots",
+    "delete-recovery-snapshot": "delete_recovery_snapshot",
 }
 COMMAND_HANDLERS: dict[str, Callable[[dict], dict]] = {}
 
