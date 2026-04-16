@@ -3,6 +3,7 @@
 > 位置づけ: このファイルは直近作業の handoff log です。現行実装の正本は `docs/engineering/current-implementation.md`、実装済み / 未実装 backlog の正本は `docs/project/unimplemented-features.md` です。末尾の Next Logical Step は作成時点の履歴として扱い、現在の作業判断では正本を優先してください。
 
 ## Snapshot
+- Phase D 更新: 2026-04-16 に M-C01 (`polygon track 作成`) を実装。frontend で `Shift+N` と `+ 多角形` を追加し、backend の既存 `create-track(shape_type="polygon")` 契約へ接続した。
 - Phase D 着手: 2026-04-17 に M-C03 (`export_enabled`) を実装。MaskTrack / export / update-track / TrackDetailPanel / TimelineView / MosaicPreviewCanvas に反映し、`visible` と独立して「書き出し対象外」を扱える。
 - Minimum flow (open video → detect → mask edit → export) was manually verified in the Tauri window on April 16, 2026.
 - Export now keeps preview/render semantics aligned for render span and segment gaps.
@@ -22,6 +23,38 @@
   - `python -m pytest tests/test_domain_track.py -k "held_segments_do_not_hide_detector_keyframe_span"` passed
   - `python -m pytest tests/test_mask_continuity.py -k "held_segment_does_not_hide_accepted_detector_keyframes"` passed
 - Current desktop build status on April 16, 2026: `npm.cmd run build` in `apps/desktop` passed.
+
+## What Was Added In This Pass (April 16, 2026 — Phase D: M-C01 polygon track creation)
+
+### スコープ
+Phase D の編集機能追加として、manual polygon track を frontend から正式に作成できるようにした。
+既存 backend の `create-track(shape_type)` 契約を利用し、UI 導線不足だけを補完した。
+
+### Backend
+- `apps/backend/tests/test_cli_smoke.py`
+  - `create_track.run()` の ellipse default と polygon payload を確認する smoke test を追加
+  - backend command 自体の挙動変更はなし
+
+### Frontend
+- `apps/desktop/src/manualTrackFactory.ts`
+  - manual track 作成 payload の小さな helper を追加
+  - polygon は初期矩形を points 化して backend へ渡す
+- `apps/desktop/src/App.tsx`
+  - `handleCreateTrack(shapeType)` に変更
+  - `Shift+N` で polygon、`N` で ellipse を作成
+  - ヘッダーに `+ 楕円` / `+ 多角形` ボタンを追加
+  - F1 の shortcut 文言に `Shift+N` を追加
+- `apps/desktop/tests/manualTrackFactory.test.ts`
+  - ellipse / polygon payload の生成を確認する unit test を追加
+
+### 検証
+- `python -m pytest tests\\test_cli_smoke.py -k "create_track_"` passed
+- `node --test --experimental-strip-types tests/manualTrackFactory.test.ts` passed
+- `npm.cmd run build` in `apps/desktop` passed
+
+### 未実施 / 残り
+- Tauri ウィンドウでの manual polygon track 作成と、その後の vertex 編集の目視確認
+- `M-C05` shortcut help modal 本体は未着手。今回は shortcut 導線追加のみ
 
 ## What Was Added In This Pass (April 17, 2026 — Phase D: M-C03 export_enabled)
 

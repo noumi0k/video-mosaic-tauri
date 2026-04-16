@@ -20,6 +20,7 @@ from auto_mosaic.api.commands import (
     cancel_runtime_job,
     create_keyframe,
     create_project,
+    create_track,
     detect_video,
     delete_keyframe,
     export_video,
@@ -1407,6 +1408,56 @@ def test_create_keyframe_roundtrip():
         {"frame_index": 10, "source": "manual", "shape_type": "polygon"},
         {"frame_index": 20, "source": "manual", "shape_type": "polygon"},
     ]
+
+
+def test_create_track_defaults_to_ellipse_shape():
+    project_path = TEST_ROOT / "create-track-ellipse.json"
+    created = create_project.run({"name": "CreateTrackEllipse"})
+    save_response = save_project.run({"project_path": str(project_path), "project": created["data"]["project"]})
+    assert save_response["ok"] is True
+
+    response = create_track.run(
+        {
+            "project_path": str(project_path),
+            "frame_index": 18,
+        }
+    )
+    assert response["ok"] is True
+    assert response["data"]["selection"]["frame_index"] == 18
+
+    loaded = load_project.run({"project_path": str(project_path)})
+    created_track = loaded["data"]["project"]["tracks"][0]
+    created_keyframe = created_track["keyframes"][0]
+    assert created_track["source"] == "manual"
+    assert created_keyframe["shape_type"] == "ellipse"
+    assert created_keyframe["bbox"] == [0.3, 0.3, 0.2, 0.2]
+
+
+def test_create_track_accepts_polygon_shape():
+    project_path = TEST_ROOT / "create-track-polygon.json"
+    created = create_project.run({"name": "CreateTrackPolygon"})
+    save_response = save_project.run({"project_path": str(project_path), "project": created["data"]["project"]})
+    assert save_response["ok"] is True
+
+    response = create_track.run(
+        {
+            "project_path": str(project_path),
+            "frame_index": 6,
+            "shape_type": "polygon",
+            "bbox": [0.2, 0.25, 0.18, 0.12],
+            "points": [[0.2, 0.25], [0.38, 0.25], [0.38, 0.37], [0.2, 0.37]],
+        }
+    )
+    assert response["ok"] is True
+    assert response["data"]["selection"] == {"track_id": response["data"]["selection"]["track_id"], "frame_index": 6}
+
+    loaded = load_project.run({"project_path": str(project_path)})
+    created_track = loaded["data"]["project"]["tracks"][0]
+    created_keyframe = created_track["keyframes"][0]
+    assert created_track["user_edited"] is True
+    assert created_keyframe["shape_type"] == "polygon"
+    assert created_keyframe["bbox"] == [0.2, 0.25, 0.18, 0.12]
+    assert created_keyframe["points"] == [[0.2, 0.25], [0.38, 0.25], [0.38, 0.37], [0.2, 0.37]]
 
 
 def test_create_keyframe_accepts_valid_ellipse():

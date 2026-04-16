@@ -39,6 +39,7 @@ import {
   resolveForEditing,
   type ResolveReason,
 } from "./maskShapeResolver";
+import { buildCreateTrackPayload } from "./manualTrackFactory";
 import {
   createHistorySnapshot,
   pushHistory,
@@ -54,6 +55,7 @@ import { uiText } from "./uiText";
 import type {
   CommandResponse,
   CreateKeyframePayload,
+  KeyframeShapeType,
   DetectJobSummary,
   ExportJobStatus,
   JobProgressView,
@@ -580,15 +582,14 @@ export function App() {
     return handleSaveProject(false);
   }
 
-  async function handleCreateTrack() {
+  async function handleCreateTrack(shapeType: KeyframeShapeType = "ellipse") {
     if (!project) return;
     const projectPath = await ensureEditableProjectPath();
     if (!projectPath) return;
-    const response = await backend<MutationCommandData>("create-track", {
-      project_path: projectPath,
-      shape_type: "ellipse",
-      frame_index: currentFrame,
-    });
+    const response = await backend<MutationCommandData>(
+      "create-track",
+      buildCreateTrackPayload({ projectPath, frameIndex: currentFrame, shapeType }),
+    );
     if (!response.ok) {
       setErrorMessage(prettyError(response.error));
       return;
@@ -1244,9 +1245,14 @@ export function App() {
         return;
       }
       // N: New ellipse track / Shift+N: New polygon track
+      if (e.key === "N" && !ctrl) {
+        e.preventDefault();
+        void handleCreateTrack("polygon");
+        return;
+      }
       if (e.key === "n" && !ctrl && !shift) {
         e.preventDefault();
-        void handleCreateTrack();
+        void handleCreateTrack("ellipse");
         return;
       }
       // I: Set in frame
@@ -1285,7 +1291,8 @@ export function App() {
           "Shift+K: キーフレーム削除\n" +
           "[ / ]: 前 / 次のキーフレーム\n" +
           "H: トラック表示切替\n" +
-          "N: 新規トラック\n" +
+          "N: 楕円トラック追加\n" +
+          "Shift+N: 多角形トラック追加\n" +
           "I: イン点を設定\n" +
           "O: アウト点を設定\n" +
           "Delete: トラック削除\n" +
@@ -1748,7 +1755,8 @@ export function App() {
           <button className="nle-btn" onClick={() => void handleOpenVideo()} disabled={Boolean(activeRuntimeByKind.get("open_video"))}>{uiText.actions.openVideo}</button>
           <button className="nle-btn" onClick={() => void handleSetupEnvironment()} disabled={Boolean(activeRuntimeByKind.get("setup_environment"))}>{uiText.actions.setup}</button>
           <button className="nle-btn" onClick={() => void handleFetchModels()} disabled={Boolean(activeRuntimeByKind.get("fetch_models"))}>{uiText.actions.fetchModels}</button>
-          <button className="nle-btn" onClick={() => void handleCreateTrack()} disabled={!project} title="手動トラック追加 (N)">+ トラック</button>
+          <button className="nle-btn" onClick={() => void handleCreateTrack("ellipse")} disabled={!project} title="楕円トラック追加 (N)">+ 楕円</button>
+          <button className="nle-btn" onClick={() => void handleCreateTrack("polygon")} disabled={!project} title="多角形トラック追加 (Shift+N)">+ 多角形</button>
           <button className="nle-btn" onClick={handleUndo} disabled={!canUndo} title="元に戻す (Ctrl+Z)">戻す{canUndo ? ` (${history.past.length})` : ""}</button>
           <button className="nle-btn" onClick={handleRedo} disabled={!canRedo} title="やり直す (Ctrl+Shift+Z)">やり直す{canRedo ? ` (${history.future.length})` : ""}</button>
           <button className="nle-btn" onClick={() => setDetectModalOpen(true)} disabled={!project || Boolean(activeDetectJob)}>{uiText.actions.detect}</button>

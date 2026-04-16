@@ -213,9 +213,7 @@ Cancel は request-based。
   - Tauri E2E
   - recovery / export output verification
 - editing UX completion
-  - polygon track 作成
   - ellipse 回転
-  - `export_enabled`
   - transport / shortcut / state visualization の拡張
 - future feature track
   - AI detect performance tuning

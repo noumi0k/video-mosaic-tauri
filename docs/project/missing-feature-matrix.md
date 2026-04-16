@@ -31,6 +31,10 @@
 - integrity-based model check、GPU 失敗時の CPU fallback
 - timeline / canvas / inspector の基本編集
 
+機能追加フェーズ以降に達成済みの項目 (履歴として残す):
+
+- [x] **M-C03** track 単位の `export_enabled` フラグ / preview の破線 outline / timeline 斜線・バッジ (2026-04-17)
+
 この文書では、上記に対してまだ不足している機能だけを列挙する。
 
 ## 2. 不足機能一覧
@@ -58,11 +62,11 @@
 
 | ID | ソース | 状態 | 不足内容 | 現状メモ | フェーズ |
 | --- | --- | --- | --- | --- | --- |
-| M-C01 | `feature_list` 6-2 | missing | 手動 polygon track 作成の正式導線 | canvas で polygon 編集はできるが、作成は ellipse のみ | D |
+| ~~M-C01~~ | `feature_list` 6-2 | done | 手動 polygon track 作成の正式導線 | 2026-04-16: ヘッダーに `+ 多角形`、`Shift+N`、初期矩形 polygon 作成を追加 | D |
 | M-C02 | `feature_list` 7-4 | missing | ellipse 回転の UI | data model と補間はあるが、操作導線がない | D |
 | ~~M-C03~~ | `feature_list` 6-8, `unique_features` 7 | done | `export_enabled` フラグと preview/timeline 上の対象外表示 | 2026-04-17 実装: domain / export / update-track / TrackDetailPanel / Timeline / Preview (破線 outline) に反映 | D |
 | M-C04 | `feature_list` 4-2/4-4/4-5, 17 | partial | 再生速度変更と transport shortcut の拡張 | play/pause と左右 step はあるが、速度変更や Home/End 系がない | D |
-| M-C05 | `feature_list` 17, 19 | partial | shortcut help を専用 modal 化し、未実装 shortcut を揃える | F1 は `window.alert`、`Ctrl+M` `Ctrl+E` `Shift+N` など未接続 | D |
+| M-C05 | `feature_list` 17, 19 | partial | shortcut help を専用 modal 化し、未実装 shortcut を揃える | F1 は `window.alert`、`Ctrl+M` `Ctrl+E` など未接続 | D |
 | M-C06 | `feature_list` 3-5, `unique_features` 16 | partial | preview mode badge、timeline legend、lost/inactive 可視化の整理 | 一部 badge はあるが、仕様書どおりの操作モード表示ではない | D |
 | M-C07 | `project checklist` D-09, `pyside6-ui-structure-reference` | missing | onion skin | 既存 backlog には残っているが、現行 Tauri には未実装 | D |
 | M-C08 | `feature_list` 3-4 | deferred | diff overlay | 仕様上はあるが、現行完成条件では後段 | D |
