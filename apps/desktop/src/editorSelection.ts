@@ -52,6 +52,7 @@ export function buildEditorState(
       state: track.state,
       source: track.source,
       visible: track.visible,
+      export_enabled: track.export_enabled ?? true,
       keyframes: track.keyframes.map((keyframe) => ({
         frame_index: keyframe.frame_index,
         shape_type: keyframe.shape_type,

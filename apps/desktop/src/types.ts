@@ -58,6 +58,7 @@ export type MaskTrack = {
   state: string;
   source: string;
   visible: boolean;
+  export_enabled: boolean;
   keyframes: Keyframe[];
   label_group: string;
   user_locked: boolean;
@@ -89,6 +90,7 @@ export type TrackSummary = {
   track_id: string;
   label: string;
   visible: boolean;
+  export_enabled: boolean;
   state: string;
   source: string;
   start_frame: number | null;
@@ -130,6 +132,7 @@ export type EditableTrack = {
   state: string;
   source: string;
   visible: boolean;
+  export_enabled: boolean;
   keyframes: EditableKeyframe[];
 };
 
@@ -325,5 +328,6 @@ export type UpdateTrackPayload = {
   track_id: string;
   patch: Partial<Pick<MaskTrack, "label" | "state" | "source" | "label_group" | "user_locked" | "user_edited">> & {
     visible?: boolean;
+    export_enabled?: boolean;
   };
 };

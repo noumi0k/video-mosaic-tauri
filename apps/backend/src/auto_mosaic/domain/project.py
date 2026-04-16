@@ -86,6 +86,7 @@ def _normalize_track_payload(payload: dict[str, Any]) -> dict[str, Any]:
         "state": str(payload.get("state", "active")),
         "source": str(payload.get("source", "manual")),
         "visible": bool(payload.get("visible", True)),
+        "export_enabled": bool(payload.get("export_enabled", True)),
         "keyframes": [_normalize_keyframe_payload(frame) for frame in payload.get("keyframes", [])],
         "label_group": str(payload.get("label_group", "")),
         "user_locked": bool(payload.get("user_locked", False)),
@@ -313,6 +314,7 @@ def _migrate_pyside6_track_payload(payload: dict[str, Any]) -> dict[str, Any]:
         "state": str(payload.get("state", "active")),
         "source": _map_pyside6_track_source(source, user_edited=user_edited),
         "visible": bool(payload.get("visible", True)),
+        "export_enabled": bool(payload.get("export_enabled", True)),
         "keyframes": keyframes,
         "label_group": str(payload.get("label_group", "")),
         "user_locked": user_locked,
@@ -515,6 +517,7 @@ class MaskTrack:
     state: str
     source: str
     visible: bool = True
+    export_enabled: bool = True
     keyframes: list[Keyframe] = field(default_factory=list)
     label_group: str = ""
     user_locked: bool = False
@@ -535,6 +538,7 @@ class MaskTrack:
             state=normalized["state"],
             source=normalized["source"],
             visible=normalized["visible"],
+            export_enabled=normalized["export_enabled"],
             keyframes=[Keyframe.from_payload(frame) for frame in normalized["keyframes"]],
             label_group=normalized["label_group"],
             user_locked=normalized["user_locked"],
@@ -721,6 +725,7 @@ class ProjectDocument:
                     "track_id": track.track_id,
                     "label": track.label,
                     "visible": track.visible,
+                    "export_enabled": track.export_enabled,
                     "state": track.state,
                     "source": track.source,
                     "start_frame": frame_indexes[0] if frame_indexes else None,

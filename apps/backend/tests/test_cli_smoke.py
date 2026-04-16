@@ -1699,6 +1699,147 @@ def test_export_video_writes_output_and_applies_shapes():
     assert untouched_difference < 8.0
 
 
+def test_export_video_skips_tracks_with_export_enabled_false():
+    source_path = TEST_ROOT / "export-disabled-source.mp4"
+    output_path = TEST_ROOT / "export-disabled-output.avi"
+    _make_sample_video(source_path)
+    created = create_project.run(
+        {
+            "name": "ExportDisabledProject",
+            "video": {
+                "source_path": str(source_path),
+                "width": 160,
+                "height": 90,
+                "fps": 24.0,
+                "frame_count": 8,
+                "duration_sec": 8 / 24.0,
+                "readable": True,
+                "warnings": [],
+                "errors": [],
+                "first_frame_shape": [90, 160, 3],
+            },
+            "tracks": [
+                {
+                    "track_id": "ellipse-track",
+                    "label": "ellipse",
+                    "state": "active",
+                    "source": "manual",
+                    "visible": True,
+                    "export_enabled": False,
+                    "segments": [{"start_frame": 0, "end_frame": 7, "state": "confirmed"}],
+                    "keyframes": [
+                        {
+                            "frame_index": 0,
+                            "shape_type": "ellipse",
+                            "points": [[0.4, 0.3], [0.6, 0.7]],
+                            "bbox": [0.4, 0.3, 0.2, 0.4],
+                            "confidence": 1.0,
+                            "source": "manual",
+                            "rotation": 0.0,
+                            "opacity": 1.0,
+                            "expand_px": None,
+                            "feather": None,
+                            "is_locked": False,
+                        }
+                    ],
+                },
+                {
+                    "track_id": "polygon-track",
+                    "label": "polygon",
+                    "state": "active",
+                    "source": "manual",
+                    "visible": True,
+                    "export_enabled": True,
+                    "keyframes": [
+                        {
+                            "frame_index": 0,
+                            "shape_type": "polygon",
+                            "points": [[0.1, 0.1], [0.25, 0.1], [0.25, 0.25]],
+                            "bbox": [0.1, 0.1, 0.15, 0.15],
+                            "confidence": 1.0,
+                            "source": "manual",
+                            "rotation": 0.0,
+                            "opacity": 1.0,
+                            "expand_px": None,
+                            "feather": None,
+                            "is_locked": False,
+                        }
+                    ],
+                },
+            ],
+        }
+    )
+    project_path = TEST_ROOT / "export-disabled-project.json"
+    save_response = save_project.run({"project_path": str(project_path), "project": created["data"]["project"]})
+    assert save_response["ok"] is True
+
+    response = export_video.run(
+        {
+            "project_path": str(project_path),
+            "output_path": str(output_path),
+            "options": {
+                "mosaic_strength": 10,
+                "audio_mode": "video_only",
+            },
+        }
+    )
+    assert response["ok"] is True
+    assert output_path.exists()
+
+    source_capture = cv2.VideoCapture(str(source_path))
+    source_ok, source_frame = source_capture.read()
+    source_capture.release()
+    assert source_ok is True
+
+    output_capture = cv2.VideoCapture(str(output_path))
+    output_ok, output_frame = output_capture.read()
+    output_capture.release()
+    assert output_ok is True
+
+    # ellipse-track has export_enabled=False, so its ROI must match the source.
+    ellipse_source = source_frame[27:63, 64:96]
+    ellipse_output = output_frame[27:63, 64:96]
+    # polygon-track stays enabled — its ROI must still be mosaicked.
+    polygon_source = source_frame[9:25, 16:40]
+    polygon_output = output_frame[9:25, 16:40]
+
+    ellipse_difference = float(np.mean(np.abs(ellipse_output.astype(np.int16) - ellipse_source.astype(np.int16))))
+    polygon_difference = float(np.mean(np.abs(polygon_output.astype(np.int16) - polygon_source.astype(np.int16))))
+
+    assert ellipse_difference < 8.0, "export_enabled=False track must not be mosaicked"
+    assert polygon_difference > 5.0, "other tracks must still be mosaicked"
+
+
+def test_update_track_roundtrip_toggles_export_enabled():
+    project_path = TEST_ROOT / "update-track-export-enabled.json"
+    _write_mutation_project(project_path)
+    response = update_track.run(
+        {
+            "project_path": str(project_path),
+            "track_id": "track-main",
+            "patch": {"export_enabled": False},
+        }
+    )
+    assert response["ok"] is True
+    loaded = load_project.run({"project_path": str(project_path)})
+    track = loaded["data"]["project"]["tracks"][0]
+    summary = loaded["data"]["read_model"]["track_summaries"][0]
+    assert track["export_enabled"] is False
+    assert summary["export_enabled"] is False
+
+    # Re-enable to confirm the patch is idempotent in both directions.
+    re_enable = update_track.run(
+        {
+            "project_path": str(project_path),
+            "track_id": "track-main",
+            "patch": {"export_enabled": True},
+        }
+    )
+    assert re_enable["ok"] is True
+    reloaded = load_project.run({"project_path": str(project_path)})
+    assert reloaded["data"]["project"]["tracks"][0]["export_enabled"] is True
+
+
 def test_export_video_does_not_hold_single_keyframe_until_video_end():
     source_path = TEST_ROOT / "export-single-keyframe-source.mp4"
     output_path = TEST_ROOT / "export-single-keyframe-output.avi"

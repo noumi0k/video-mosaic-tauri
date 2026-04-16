@@ -242,6 +242,7 @@ export function TimelineView({
                 "nle-tl-row",
                 selected ? "nle-tl-row--selected" : "",
                 !track.visible ? "nle-tl-row--hidden" : "",
+                !track.export_enabled ? "nle-tl-row--export-disabled" : "",
                 !selected && !activeNow ? "nle-tl-row--inactive" : "",
               ]
                 .filter(Boolean)
@@ -274,6 +275,14 @@ export function TimelineView({
                     <span className="nle-tl-row__name" title={track.label}>
                       {track.label}
                     </span>
+                    {!track.export_enabled && (
+                      <span
+                        className="nle-tl-row__export-badge"
+                        title="書き出し対象外"
+                      >
+                        書き出し外
+                      </span>
+                    )}
                     <span className="nle-tl-row__label-meta">{track.keyframe_count}kf</span>
                   </div>
 
@@ -361,6 +370,8 @@ export function TimelineView({
         <span className="nle-tl-legend__item nle-tl-legend__item--seg-held">held</span>
         <span className="nle-tl-legend__item nle-tl-legend__item--seg-uncertain">uncertain</span>
         <span className="nle-tl-legend__item nle-tl-legend__item--seg-interpolated">補間</span>
+        <span className="nle-tl-legend__separator">状態:</span>
+        <span className="nle-tl-legend__item nle-tl-legend__item--export-disabled">書き出し外</span>
       </div>
     </div>
   );

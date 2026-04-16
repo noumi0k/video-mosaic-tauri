@@ -2211,6 +2211,9 @@ button {
 .nle-tl-legend__item--seg-uncertain    { color: #D97706; }
 .nle-tl-legend__item--seg-interpolated { color: #7C3AED; }
 
+/* Export-disabled legend */
+.nle-tl-legend__item--export-disabled { color: #DC2626; }
+
 /* ============================================================
    DETECT MODAL (AI検出設定)
    ============================================================ */
@@ -2774,6 +2777,29 @@ details.nle-inspector-section:not([open]) > .nle-inspector-section__body {
 .nle-tl-row__bar--hidden {
   opacity: 0.3;
   background: var(--text-dim);
+}
+
+/* --- Timeline export-disabled track (mosaic not applied in export) --- */
+.nle-tl-row--export-disabled .nle-tl-row__lane {
+  background-image: repeating-linear-gradient(
+    45deg,
+    transparent,
+    transparent 6px,
+    rgba(220, 38, 38, 0.12) 6px,
+    rgba(220, 38, 38, 0.12) 12px
+  );
+}
+
+.nle-tl-row__export-badge {
+  display: inline-block;
+  padding: 0 4px;
+  margin-left: 4px;
+  font-size: 10px;
+  color: #DC2626;
+  border: 1px solid #DC2626;
+  border-radius: 3px;
+  line-height: 14px;
+  white-space: nowrap;
 }
 
 /* ============================================================

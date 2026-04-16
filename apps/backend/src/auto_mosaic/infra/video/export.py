@@ -395,6 +395,8 @@ def _ffmpeg_pipe_export(
             for track in project.tracks:
                 if not track.visible:
                     continue
+                if not track.export_enabled:
+                    continue
                 _resolved = resolve_for_render(track, frame_index)
                 if _resolved is None:
                     continue
@@ -728,6 +730,8 @@ def export_project_video(
                         rendered = frame
                         for track in project.tracks:
                             if not track.visible:
+                                continue
+                            if not track.export_enabled:
                                 continue
                             _resolved = resolve_for_render(track, frame_index)
                             if _resolved is None:

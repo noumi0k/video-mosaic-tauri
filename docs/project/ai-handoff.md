@@ -3,6 +3,7 @@
 > 位置づけ: このファイルは直近作業の handoff log です。現行実装の正本は `docs/engineering/current-implementation.md`、実装済み / 未実装 backlog の正本は `docs/project/unimplemented-features.md` です。末尾の Next Logical Step は作成時点の履歴として扱い、現在の作業判断では正本を優先してください。
 
 ## Snapshot
+- Phase D 着手: 2026-04-17 に M-C03 (`export_enabled`) を実装。MaskTrack / export / update-track / TrackDetailPanel / TimelineView / MosaicPreviewCanvas に反映し、`visible` と独立して「書き出し対象外」を扱える。
 - Minimum flow (open video → detect → mask edit → export) was manually verified in the Tauri window on April 16, 2026.
 - Export now keeps preview/render semantics aligned for render span and segment gaps.
 - Export auto encoder now retries with CPU (`libx264`) when a probed GPU encoder fails at runtime.
@@ -21,6 +22,50 @@
   - `python -m pytest tests/test_domain_track.py -k "held_segments_do_not_hide_detector_keyframe_span"` passed
   - `python -m pytest tests/test_mask_continuity.py -k "held_segment_does_not_hide_accepted_detector_keyframes"` passed
 - Current desktop build status on April 16, 2026: `npm.cmd run build` in `apps/desktop` passed.
+
+## What Was Added In This Pass (April 17, 2026 — Phase D: M-C03 export_enabled)
+
+### スコープ
+Phase D (Editing UX Completion) の最初の項目として、`MaskTrack.export_enabled` フラグを導入。
+`visible` (UI 表示の on/off) とは独立した責務で、「書き出し対象外」を明示的に扱う。
+
+### Backend
+- `apps/backend/src/auto_mosaic/domain/project.py`
+  - `MaskTrack` dataclass に `export_enabled: bool = True` を追加
+  - `_normalize_track_payload` / `_migrate_pyside6_track_payload` / `MaskTrack.from_payload` / `build_read_model` に反映
+  - schema_version は v2 のまま (default=True の後方互換で旧 payload を補完)
+- `apps/backend/src/auto_mosaic/infra/video/export.py`
+  - FFmpeg pipe export と OpenCV fallback の両方で `visible` チェック直後に `export_enabled` ガードを追加
+- `apps/backend/src/auto_mosaic/api/commands/update_track.py`
+  - patch で `export_enabled` を受け入れる
+
+### Frontend
+- `apps/desktop/src/types.ts`: `MaskTrack` / `TrackSummary` / `EditableTrack` / `UpdateTrackPayload` に追加
+- `apps/desktop/src/editorSelection.ts`: `writeTracks` マッピングに追加
+- `apps/desktop/src/components/TrackDetailPanel.tsx`: meta 行とトグルボタンを追加
+- `apps/desktop/src/App.tsx`: `handleToggleTrackExportEnabled` を追加
+- `apps/desktop/src/components/TimelineView.tsx`: `nle-tl-row--export-disabled` と右側バッジ、legend に項目追加
+- `apps/desktop/src/components/MosaicPreviewCanvas.tsx`: `export_enabled=false` の track は破線 outline のみ描画 (モザイク非適用)
+- `apps/desktop/src/styles.css`: 斜線パターン / 赤バッジ / legend 色を追加
+
+### テスト
+- `apps/backend/tests/test_domain_track.py`: `TestExportEnabledFlag` クラス (default, legacy payload, false payload, asdict roundtrip, visible との独立性) を追加
+- `apps/backend/tests/test_cli_smoke.py`:
+  - `test_export_video_skips_tracks_with_export_enabled_false` (ellipse ROI が source と一致、polygon は従来どおりモザイクされる)
+  - `test_update_track_roundtrip_toggles_export_enabled` (patch で往復切替)
+
+### 検証
+- `py -3.12 -m pytest tests/test_domain_track.py -q` → 35 passed
+- `py -3.12 -m pytest tests/test_cli_smoke.py -k "export_enabled_false or toggles_export_enabled" -q` → 2 passed
+- `npm.cmd run build` in `apps/desktop` → passed
+- `npm.cmd run check:mojibake` in `apps/desktop` → passed
+- 既存の failure (`test_export_video_mux_if_possible_reports_video_only_when_source_has_no_audio`, `test_list_detect_jobs_*`, `npm test` の maskShapeResolver parity) は変更前から存在し本パスの変更とは無関係であることを `git stash` 比較で確認
+
+### 未検証 / 残り
+- Tauri ウィンドウでの目視確認 (トグル操作、preview の破線 outline、timeline の斜線パターン)
+- `npm.cmd run review:runtime` の再同期 (review build に反映する場合)
+
+---
 
 ## What Was Fixed In This Pass (April 16, 2026 — minimum flow verification follow-up)
 

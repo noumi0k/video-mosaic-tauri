@@ -1,133 +1,152 @@
-# 未実装機能一覧
+# 実装ロードマップ
 
-最終更新: 2026-04-16 (Phase 1 完了 / Phase 2 一部実装済み)
+最終更新: 2026-04-17
 
-このファイルは、実装済み / 未実装 backlog の正本です。
-現行実装の責務境界と不変条件は [../engineering/current-implementation.md](../engineering/current-implementation.md) を参照してください。
-安定化フェーズ完了後の開発方針とフェーズ票は [pyside6-editing-experience-parity-checklist.md](./pyside6-editing-experience-parity-checklist.md) を中核にします。
-PySide6版のUI構成、ボタン配置、メニュー構成を確認する場合は [pyside6-ui-structure-reference.md](./pyside6-ui-structure-reference.md) を参照してください。
+この文書は、[missing-feature-matrix.md](./missing-feature-matrix.md) を実装順に並べ替えたロードマップです。
+機能差分の正本は `missing-feature-matrix.md`、不変条件の正本は [../engineering/current-implementation.md](../engineering/current-implementation.md) を参照してください。
 
-## 1. 実装済み (今回の移行作業で完了)
+## 1. 現在の判断
 
-### 1.1 PySide6 移行コア
-- [x] PySide6 project v1 → Tauri schema v2 migration adapter
-- [x] Keyframe source mapping (auto→detector, manual→manual, anchor_fallback→detector_anchored)
-- [x] user_locked / user_edited track の AI 検出置換保護
-- [x] Polygon interpolation (resample + align + lerp) — backend + frontend
-- [x] Ellipse interpolation (bbox + rotation + confidence + opacity)
-- [x] expand_px / feather interpolation
-- [x] Track stitching (180 frame gap, spatial similarity)
-- [x] Ephemeral track filter (min 2 keyframes)
-- [x] Matching gap 拡大 (12→60 frames, PySide6 同等)
+- Tauri 安定化フェーズは完了扱いとする
+- 最小導線 `open video -> detect -> mask edit -> save/load -> export` は手動確認済み
+- これ以降の作業は「安定化の続き」ではなく「製品機能の完成」と「回帰防止」のフェーズに入る
+- PySide6 比較資料は補助資料であり、今後の正本は `feature_list.md` / `unique_features.md` / `missing-feature-matrix.md` / この文書の 4 点に寄せる
 
-### 1.2 ランタイム・検出
-- [x] Dev mode runtime 解決 (CARGO_MANIFEST_DIR + venv 自動検出)
-- [x] Backend venv セットアップ (Python 3.12 + cv2 + numpy + onnxruntime)
-- [x] AI 検出 → UI 反映の race condition 修正
-- [x] reconcile_job_state: result.json 存在時に succeeded に修正
-- [x] Frontend: 未処理 terminal ジョブの再ポーリング
+## 2. Phase A: Persistent Workflow Completion
 
-### 1.3 Export
-- [x] FFmpeg h264 パイプエンコード (OpenCV フォールバック付き)
-- [x] 解像度プリセット (source / 720p / 1080p / 4K)
-- [x] 自動ビットレート (解像度連動) + 手動指定
-- [x] Audio mux (ffmpeg 1パス)
-- [x] UI 解像度セレクタ
-- [x] GPU エンコーダー選択 (h264_nvenc → h264_qsv → h264_amf → libx264 fallback)
-- [x] expand_px: エクスポート時にマスク境界を外側へ拡張 (cv2.dilate)
-- [x] feather: エクスポート時にマスクエッジを軟化 (GaussianBlur + alpha compositing)
-- [x] エクスポート前に常に最新状態を保存 (未保存編集がエクスポートに反映されないバグ修正)
+目的:
+- recovery と review safety を frontend 一時 state から外し、再起動に耐える実装へ移す
 
-### 1.4 編集・UI
-- [x] Undo / Redo (Ctrl+Z / Ctrl+Shift+Z)
-- [x] Track 作成 / 削除ボタン
-- [x] キーボードショートカット (Arrow, Space, K, Shift+K, [, ], H, N, Delete, Ctrl+S, I, O)
-- [x] 未保存ガード (New / Open / Open Video 前の確認)
-- [x] 自動保存 (60秒間隔、保存済みプロジェクトのみ)
-- [x] 範囲検出 (I/O マーカー + start_frame/end_frame)
-- [x] 危険フレーム検出 (export 前警告: KFギャップ, エリア急変, 低信頼度)
-- [x] モデル取得 HTML/LFS 対策 (Git LFS ポインタ検出追加)
-- [x] モザイクプレビュー (render span 準拠の preview overlay)
-- [x] export 完了後に出力フォルダを開く
+完了条件:
+- recovery snapshot を backend/file-backed で保持できる
+- 起動時 recovery dialog が backend 側の snapshot を読む
+- danger warning が `review / export anyway / cancel` の 3 択で動く
+- warning 確認済み状態の保存先を明文化し、再起動時の扱いが決まっている
 
-### 1.5 既存実装 (移行前から動作)
-- [x] subprocess + CLI + JSON I/O 連携
-- [x] project save / load / save as
-- [x] track / keyframe 選択同期
-- [x] inspector 編集 (bbox, points, shape_type)
-- [x] canvas 直接編集 (ellipse 移動/リサイズ, polygon 頂点操作)
-- [x] timeline (tracks, keyframes, playhead, zoom, ruler)
-- [x] export / cancel / progress polling
-- [x] doctor / model integrity / review package
-- [x] 再生同期 (video ↔ currentFrame 双方向)
+対象:
+- `M-A01` file-backed recovery
+- `M-A02` recovery fail-safe / interrupted restore policy
+- `M-A03` export 前 danger warning dialog 化
+- `M-A04` confirmed warning state の保存方針固定
 
-### 1.6 Phase 1 Stability Gate (2026-04-15 完了)
-- [x] Detect Job Ledger (SQLite canonical state): `job-ledger-migration-plan.md` 全実行
-- [x] `get-detect-status` / `get-detect-result` が ledger state を正とする
-- [x] frontend の result_available / has_result 推論と grace period polling を削除
-- [x] Job Panel の detect cancel ボタン復旧 (nle-btn--cancel スタイル付き)
-- [x] メインウィンドウ終了時に backend worker / child process を自動キャンセル (onCloseRequested)
-- [x] AI 自動検出の GPU provider 自動選択 (CUDA → DirectML → CPU fallback)
-- [x] GPU/CPU 利用状況を detect job 進捗メッセージで表示
-- [x] detect stage ラベルを日本語化 (uiText.jobStages 追加)
+検証:
+- dirty project を作成して snapshot 保存
+- 再起動後に復元 / 破棄の両方を確認
+- danger warning が残っている状態で export を開き、review/export/cancel の 3 導線を確認
 
-### 1.7 Phase 2 Review Workflow Gap (2026-04-15 一部実装)
-- [x] 全体検出前の上書き確認モーダル（手動保護 / 全上書き / キャンセル の3択）
-- [x] backend: `overwrite_manual_tracks` フラグで全上書きを選択可能
-- [x] danger warning 確認状態を App.tsx に lift up (confirmedDangerFrames)
-- [x] danger warning 確認済み行をグレー表示・左ボーダー色変更
-- [x] timeline danger marker: 確認済みをグレーアウト表示
+## 3. Phase B: Export Workflow Completion
 
-## 2. 未実装 (P2: 中優先)
+目的:
+- 現在の単発 export を、仕様書どおりの queue ベース workflow に拡張する
 
-### 2.1 Review Workflow (残り)
-- [ ] export 前の danger warning 確認状態チェック（全確認済みでない場合の警告改善）
-- [ ] recovery の file-backed 化（localStorage 依存から backend ファイルへ）
+完了条件:
+- 複数 export job を queue に積める
+- queue は逐次実行される
+- 再起動後に `running` job は `interrupted` へ復元される
+- export 設定 UI が、現在の仕様書で必須とする項目を扱える
 
-### 2.2 オニオンスキン
-- [ ] 前後フレームの keyframe shape を半透明で重ねて表示
-- [ ] toggle UI (CanvasStagePanel)
+対象:
+- `M-B01` multi-job export queue
+- `M-B02` queue persistence / interrupted restore
+- `M-B03` export settings breadth の拡張
+- `M-B04` user-defined export preset
+- `M-B05` queue UI / recent results
 
-### 2.3 AI 検出速度最適化
-- [ ] CUDA 検出は完走確認済みだが、現状は CPU より遅く見えるケースがあるため、速度測定とボトルネック分析を行う
-- [ ] ONNX Runtime session / provider options / input resolution / batch size / frame sampling / pre/post-process の切り分け
-- [ ] GPU が遅い環境では CPU fallback または auto 判定が合理的に選ばれるようにする
+検証:
+- queue に 2 件以上追加して順次実行
+- 実行中にアプリを閉じ、再起動後の interrupted 復元を確認
+- queue 経由でも cancel / completed / failed が崩れないことを確認
 
-### 2.4 Export キュー
-- [ ] 複数 export ジョブの逐次実行
-- [ ] キュー永続化と recovery
+## 4. Phase C: Regression And Verification
 
-### 2.5 E2E テスト
-- [ ] canvas drag ベースの実操作テスト
-- [ ] review package 起動後の一連フローテスト
+目的:
+- ここまでの persistent workflow と export workflow を、人手だけに依存せず守れる状態にする
 
-## 3. 未実装 (P3: 後優先)
+完了条件:
+- Tauri 実ウィンドウを使った代表フローの E2E がある
+- recovery と export queue の再起動系を自動または半自動で検証できる
+- export 出力の最低限の自動検証がある
 
-### 3.1 教師データ保存
-- [ ] opt-in UI
-- [ ] crop / 初期予測 / 最終結果 / metadata 保存
-- [ ] dataset manifest 生成
+対象:
+- `M-E01` Tauri E2E
+- `M-E02` crash recovery E2E
+- `M-E03` export output verification
 
-### 3.2 ローカル再学習
-- [ ] training dataset validator
-- [ ] retraining job
-- [ ] 学習済みモデル管理
+検証:
+- `open -> detect -> edit -> save/load -> export` の代表フロー
+- recovery / interrupted export queue の復元フロー
+- 既知の ROI にモザイクが入ることの自動確認
 
-### 3.3 最終 installer / updater
-- [ ] Windows 正式 installer
-- [ ] auto updater
-- [ ] アンインストーラ
+## 5. Phase D: Editing UX Completion
 
-### 3.4 Crash recovery
-- [ ] atomic write + recovery dialog
-- [ ] 中断ジョブの自動検出と復帰
+目的:
+- コア workflow を壊さない前提で、仕様書にある編集体験の不足分を埋める
 
-## 4. 優先順位まとめ
+完了条件:
+- polygon track 作成、ellipse 回転、`export_enabled` が揃う
+- transport / shortcut / help が現在の仕様書に近づく
+- preview / timeline の状態表示が整理される
+- 後回し機能は `deferred` のまま採否を明文化する
 
-| 優先度 | 状態 | 内容 |
-|--------|------|------|
-| P0 | **全完了** | Persistent mask track, 検出外編集, continuity/fallback, manual anchor 継承 |
-| P1 | **全完了** | Timeline zoom, export parity, progress UX, keyboard shortcuts, autosave, range detect |
-| P1+ | **全完了** | Phase 1 Stability Gate (Ledger, cancel, shutdown, GPU/CPU display) |
-| P2 | 残6領域 | Review Workflow 残り, オニオンスキン, AI 検出速度最適化, export キュー, E2E テスト, crash recovery |
-| P3 | 残3件 | 教師データ, 再学習, installer |
+対象:
+- `M-C01` polygon track 作成
+- `M-C02` ellipse 回転 UI
+- ~~`M-C03` `export_enabled`~~ (2026-04-17 実装済み)
+- `M-C04` playback speed / transport jump
+- `M-C05` shortcut help modal と未接続 shortcut
+- `M-C06` mode badge / legend / state visualization
+- `M-C07` onion skin
+- `M-C08` diff overlay (`deferred` の再評価)
+- `M-C09` UI 言語切替
+- `M-C10` inspector 折りたたみ
+
+検証:
+- canvas / timeline / inspector の一連操作
+- shortcut 一覧と実際の割り当てが一致すること
+- `export_enabled` off の track が preview と export で期待どおり分離されること
+
+## 6. Phase E: AI / Data / Distribution
+
+目的:
+- 製品完成後の差別化機能と配布整備を進める
+
+完了条件:
+- detect 速度最適化方針が決まり、実装または判断保留の理由が残る
+- model management / contour follow / detector breadth の扱いが整理される
+- teacher dataset / retraining / installer の入口ができる
+
+対象:
+- `M-D01` AI detect performance tuning
+- `M-D02` contour follow
+- `M-D03` installed model management
+- `M-D04` detector engine breadth の再判断
+- `M-D05` detect settings persistence
+- `M-E04` teacher dataset
+- `M-E05` local retraining
+- `M-E06` installer / updater
+
+検証:
+- GPU/CPU の実測比較
+- contour follow の停止条件と manual 保護
+- installer / updater は別途配布手順書とあわせて確認
+
+## 7. すぐに実装対象へ落とすときの単位
+
+実装依頼は、この文書の phase と `missing-feature-matrix.md` の ID をセットで切る。
+
+例:
+
+```text
+Phase B の M-B01 / M-B02 を実装してください。
+完了条件:
+- 複数 export job を queue に積める
+- queue は逐次実行される
+- 再起動後に running job は interrupted として復元される
+- 関連テストを追加する
+```
+
+## 8. 補助資料
+
+- PySide6 比較の機能 ID と観察ログ: [pyside6-editing-experience-parity-checklist.md](./pyside6-editing-experience-parity-checklist.md)
+- PySide6 UI 観察記録: [pyside6-ui-structure-reference.md](./pyside6-ui-structure-reference.md)
+- 直近の時系列 handoff: [ai-handoff.md](./ai-handoff.md)

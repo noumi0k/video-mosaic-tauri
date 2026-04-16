@@ -1,6 +1,8 @@
 """Unit tests for MaskTrack domain rules — track lifetime and shape resolution."""
 from __future__ import annotations
 
+from dataclasses import asdict
+
 import pytest
 
 from auto_mosaic.domain.project import Keyframe, MaskSegment, MaskTrack
@@ -252,3 +254,66 @@ class TestResolutionConsistency:
         kf = track.resolve_shape_for_editing(21)
         assert kf is not None
         assert kf.frame_index == 20
+
+
+# ---------------------------------------------------------------------------
+# export_enabled flag — independent from visible, default True for legacy data
+# ---------------------------------------------------------------------------
+
+class TestExportEnabledFlag:
+    def _base_payload(self) -> dict:
+        return {
+            "track_id": "t1",
+            "label": "Test",
+            "state": "active",
+            "source": "manual",
+            "keyframes": [
+                {
+                    "frame_index": 0,
+                    "shape_type": "polygon",
+                    "points": [[0.1, 0.1], [0.2, 0.1], [0.2, 0.2]],
+                    "bbox": [0.1, 0.1, 0.1, 0.1],
+                    "confidence": 1.0,
+                    "source": "manual",
+                }
+            ],
+        }
+
+    def test_default_is_true_for_fresh_track(self):
+        track = MaskTrack(track_id="t1", label="Test", state="active", source="manual")
+        assert track.export_enabled is True
+
+    def test_legacy_payload_without_flag_defaults_to_true(self):
+        track = MaskTrack.from_payload(self._base_payload())
+        assert track.export_enabled is True
+
+    def test_payload_false_is_preserved(self):
+        payload = self._base_payload()
+        payload["export_enabled"] = False
+        track = MaskTrack.from_payload(payload)
+        assert track.export_enabled is False
+
+    def test_export_enabled_roundtrips_through_asdict(self):
+        track = MaskTrack(
+            track_id="t1",
+            label="Test",
+            state="active",
+            source="manual",
+            export_enabled=False,
+        )
+        data = asdict(track)
+        assert data["export_enabled"] is False
+        restored = MaskTrack.from_payload(data)
+        assert restored.export_enabled is False
+
+    def test_export_enabled_is_independent_from_visible(self):
+        track = MaskTrack(
+            track_id="t1",
+            label="Test",
+            state="active",
+            source="manual",
+            visible=True,
+            export_enabled=False,
+        )
+        assert track.visible is True
+        assert track.export_enabled is False

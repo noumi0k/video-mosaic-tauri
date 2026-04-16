@@ -29,6 +29,8 @@ def run(payload: dict) -> dict:
         track.label = str(patch["label"])
     if "visible" in patch:
         track.visible = bool(patch["visible"])
+    if "export_enabled" in patch:
+        track.export_enabled = bool(patch["export_enabled"])
     if "state" in patch:
         track.state = str(patch["state"])
     if "source" in patch:

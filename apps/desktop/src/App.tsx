@@ -697,6 +697,24 @@ export function App() {
     applyMutationResult(response.data);
   }
 
+  async function handleToggleTrackExportEnabled() {
+    if (!selectedTrackId || !readModel) return;
+    const projectPath = await ensureEditableProjectPath();
+    if (!projectPath) return;
+    const selectedTrack = readModel.track_summaries.find((track) => track.track_id === selectedTrackId);
+    if (!selectedTrack) return;
+    const response = await backend<MutationCommandData>("update-track", {
+      project_path: projectPath,
+      track_id: selectedTrackId,
+      patch: { export_enabled: !selectedTrack.export_enabled },
+    });
+    if (!response.ok) {
+      setErrorMessage(prettyError(response.error));
+      return;
+    }
+    applyMutationResult(response.data);
+  }
+
   async function handleMoveSelectedKeyframe(delta: number) {
     if (!selectedTrackId || selectedKeyframeFrame === null) return;
     const projectPath = await ensureEditableProjectPath();
@@ -1931,6 +1949,7 @@ export function App() {
                   handleSeekFrame(frameIndex);
                 }}
                 onToggleVisible={() => void handleToggleTrackVisible()}
+                onToggleExportEnabled={() => void handleToggleTrackExportEnabled()}
                 onDuplicateTrack={() => void handleDuplicateTrack()}
                 onSplitTrack={() => void handleSplitTrack()}
                 onDeleteTrack={() => void handleDeleteTrack()}

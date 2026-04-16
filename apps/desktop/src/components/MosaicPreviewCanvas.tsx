@@ -81,6 +81,49 @@ function drawMosaicRegion(
   ctx.restore();
 }
 
+function drawOutlineOnly(
+  ctx: CanvasRenderingContext2D,
+  keyframe: Keyframe,
+  width: number,
+  height: number,
+): void {
+  ctx.save();
+  ctx.strokeStyle = "rgba(220, 38, 38, 0.9)";
+  ctx.lineWidth = 1.5;
+  ctx.setLineDash([6, 4]);
+  ctx.beginPath();
+
+  if (keyframe.shape_type === "ellipse") {
+    if (!keyframe.bbox || keyframe.bbox.length < 4) {
+      ctx.restore();
+      return;
+    }
+    const centerX = (keyframe.bbox[0]! + keyframe.bbox[2]! / 2) * width;
+    const centerY = (keyframe.bbox[1]! + keyframe.bbox[3]! / 2) * height;
+    const radiusX = (keyframe.bbox[2]! / 2) * width;
+    const radiusY = (keyframe.bbox[3]! / 2) * height;
+    ctx.ellipse(centerX, centerY, radiusX, radiusY, 0, 0, Math.PI * 2);
+  } else if (keyframe.shape_type === "polygon") {
+    if (!keyframe.points || keyframe.points.length < 3) {
+      ctx.restore();
+      return;
+    }
+    const firstPoint = keyframe.points[0]!;
+    ctx.moveTo(firstPoint[0]! * width, firstPoint[1]! * height);
+    for (let index = 1; index < keyframe.points.length; index += 1) {
+      const point = keyframe.points[index]!;
+      ctx.lineTo(point[0]! * width, point[1]! * height);
+    }
+    ctx.closePath();
+  } else {
+    ctx.restore();
+    return;
+  }
+
+  ctx.stroke();
+  ctx.restore();
+}
+
 type Props = {
   videoRef: RefObject<HTMLVideoElement | null>;
   tracks: MaskTrack[];
@@ -133,6 +176,10 @@ export function MosaicPreviewCanvas({
       if (!track.visible) continue;
       const resolved = resolveForRender(track, frameIndex);
       if (!resolved) continue;
+      if (!track.export_enabled) {
+        drawOutlineOnly(ctx, resolved.keyframe, width, height);
+        continue;
+      }
       drawMosaicRegion(ctx, video, resolved.keyframe, width, height, cellSize);
     }
   }
