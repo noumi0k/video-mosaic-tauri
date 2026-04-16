@@ -12,6 +12,16 @@
 - これ以降の作業は「安定化の続き」ではなく「製品機能の完成」と「回帰防止」のフェーズに入る
 - PySide6 比較資料は補助資料であり、今後の正本は `feature_list.md` / `unique_features.md` / `missing-feature-matrix.md` / この文書の 4 点に寄せる
 
+### Phase 進捗サマリ (2026-04-17 時点)
+
+| Phase | 目的 | 状態 |
+| --- | --- | --- |
+| A | Persistent workflow completion (recovery / review safety) | 未着手 |
+| B | Export workflow completion (queue / preset) | 未着手 |
+| C | Regression & verification (Tauri E2E / output verify) | 未着手 |
+| **D** | **Editing UX completion (M-C01〜M-C10)** | **コード実装完了、目視レビュー待ち** |
+| E | AI / data / distribution | 未着手 |
+
 ### 達成済みチェックリスト
 
 機能追加フェーズで完了した ID を、達成順に履歴として残す。詳細は
