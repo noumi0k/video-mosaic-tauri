@@ -1,6 +1,6 @@
 # 不足機能マトリクス
 
-最終更新: 2026-04-17 (Phase D 完了 pass)
+最終更新: 2026-04-17 (Phase A / B core / C core / D 完了)
 
 この文書は、追加された仕様書 [../feature_list.md](../feature_list.md) と [../unique_features.md](../unique_features.md) を基準に、現行 Tauri 実装でまだ不足している機能を整理した差分一覧です。
 

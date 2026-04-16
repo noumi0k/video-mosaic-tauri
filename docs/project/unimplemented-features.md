@@ -1,6 +1,6 @@
 # 実装ロードマップ
 
-最終更新: 2026-04-17 (Phase D 完了 pass)
+最終更新: 2026-04-17 (Phase A / B core / C core / D 完了)
 
 この文書は、[missing-feature-matrix.md](./missing-feature-matrix.md) を実装順に並べ替えたロードマップです。
 機能差分の正本は `missing-feature-matrix.md`、不変条件の正本は [../engineering/current-implementation.md](../engineering/current-implementation.md) を参照してください。
@@ -50,8 +50,25 @@
   - `Shift+M` で全 visible && export_enabled track の resolve_for_render 結果を canvas に半透明マゼンタで重ね、モザイク適用領域を可視化
 - [x] **M-C10** inspector 折りたたみ永続化 (Phase D / 2026-04-17)
   - `usePersistedDetails` hook で `<details>` 開閉状態を localStorage に保存
+- [x] **M-A01 / M-A02** file-backed recovery + fail-safe (Phase A / 2026-04-17)
+  - `user-data/recovery/{id}.json` に JSON 保存、atomic write、壊れた snapshot は `broken[]` に分離
+- [x] **M-A03** export 前 3 択 danger modal (Phase A / 2026-04-17)
+  - 未確認 danger frame がある時に `詳細を確認 / そのまま書き出し / キャンセル` の modal
+- [x] **M-A04** confirmed danger frames を recovery snapshot に保存 (Phase A / 2026-04-17)
+- [x] **M-B01 / M-B02** file-backed export queue + drive loop + interrupted 復元 (Phase B / 2026-04-17)
+  - `user-data/export-queue/queue.json` に atomic write、list 時に `running → interrupted` へ coerce、`再実行` で requeue
+- [x] **M-B04** user-defined export preset (Phase B / 2026-04-17)
+  - `user-data/presets/{name}.json` + ExportSettingsModal の preset セレクタ + save/delete
+- [x] **M-B05** export queue UI (Phase B / 2026-04-17)
+  - Job Panel 下に queue セクション、state 別色分け、削除 / 再実行 / 一括クリア
+- [x] **M-E02 (backend)** recovery end-to-end backend 検証 (Phase C / 2026-04-17)
+  - `test_recovery_workflow_simulates_restart` で save → 再起動模擬 → restore → delete
+- [x] **M-E03** export output multi-frame ROI verification (Phase C / 2026-04-17)
+  - 8 フレーム全てで ROI のピクセル差分を assert
 
-**Phase D (Editing UX Completion) は全 10 項目達成**。コード実装は完了しており、次は Tauri ウィンドウでの目視レビュー。
+**Phase D (Editing UX Completion) は全 10 項目達成**、Phase A / B core / C core も完了。コード実装は完了しており、次は Tauri ウィンドウでの目視レビュー。別パス送り:
+- **M-B03**: FFmpeg codec/container/fps/quality 詳細 (export.py の分岐大改修が必要)
+- **M-E01**: Tauri 実ウィンドウ E2E (tauri-driver / playwright 導入が必要)
 
 ## 2. Phase A: Persistent Workflow Completion
 

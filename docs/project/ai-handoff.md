@@ -3,6 +3,7 @@
 > 位置づけ: このファイルは直近作業の handoff log です。現行実装の正本は `docs/engineering/current-implementation.md`、実装済み / 未実装 backlog の正本は `docs/project/unimplemented-features.md` です。末尾の Next Logical Step は作成時点の履歴として扱い、現在の作業判断では正本を優先してください。
 
 ## Snapshot
+- **現状 (2026-04-17)**: Phase A (M-A01〜M-A04) と Phase D (M-C01〜M-C10) は完了。Phase B は core (M-B01 / M-B02 / M-B04 / M-B05) 完了で M-B03 (codec/container 詳細) のみ別パス送り。Phase C は M-E02 (backend) / M-E03 完了で M-E01 Tauri 実操作 E2E は別パス送り。目視レビュー待ち。
 - **Phase C (部分完了, 2026-04-17 7th)**: export multi-frame verification (M-E03) と recovery restart 再現テスト (M-E02 backend) を追加。M-E01 Tauri 実操作 E2E は別パス。
 - **Phase B: M-B04 preset 追加 (2026-04-17 6th)**: user-defined preset の save / list / delete + UI。M-B03 (codec/container 詳細) は別パス。
 - **Phase B core 完了 (2026-04-17 5th pass)**: export queue の file-backed 実装、frontend drive loop、queue UI を追加。

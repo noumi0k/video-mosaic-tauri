@@ -1,6 +1,6 @@
 # Auto Mosaic 現行実装 正本
 
-最終更新: 2026-04-17 (Phase D 完了 / 目視レビュー前)
+最終更新: 2026-04-17 (Phase A / B core / C core / D 完了 — 目視レビュー前)
 
 この文書は、現行リポジトリで作業するエンジニア / AI エージェント向けの正本です。
 人間向けの説明は [../human/product-spec.md](../human/product-spec.md) に置き、ここでは実装判断に必要な境界、不変条件、実装済み状態を扱います。
@@ -146,6 +146,36 @@ GPU encoder は `auto` / `gpu` / `cpu` を扱う。
 `auto` では `h264_nvenc` → `h264_qsv` → `h264_amf` を優先し、runtime failure 時は `libx264` へ再試行する。
 エクスポート前には frontend 側で最新 project state を必ず保存する。
 モザイク適用は `expand_px` と `feather` を export path で反映する。
+`ellipse` 形状は `rotation` (度) を `cv2.ellipse(angle)` に渡して描画する。
+
+### Export queue (2026-04-17)
+
+- queue state は `user-data/export-queue/queue.json` に 1 ファイル配列で永続化される。
+- CLI commands: `list-export-queue`, `enqueue-export`, `update-export-queue-item`, `remove-export-queue-item`, `clear-terminal-export-queue`.
+- `queue_id` は `[A-Za-z0-9._-]{1,128}` のみ許可。
+- `list-export-queue` は起動/再接続時に `running` を `interrupted` へ coerce し、`recovered_interrupted` 件数を返す。
+- 実行 drive loop は frontend 側に置く。queue item を 1 件ずつ `queued → running → completed/failed` と遷移させ、`export-video` はその transition 内から呼び出す。
+
+### Export preset
+
+- preset は `user-data/presets/{name}.json` に 1 ファイル 1 preset で保存される (`name` は `[A-Za-z0-9 ._-]{1,128}`)。
+- CLI commands: `list-export-presets`, `save-export-preset`, `delete-export-preset`.
+- `export-video` 自体の受け入れフィールドは既存通り (`mosaic_strength` / `audio_mode` / `resolution` / `bitrate_kbps` / `encoder`)。video codec / container / fps / quality 詳細 (M-B03) は未対応。
+
+### Recovery snapshots (2026-04-17)
+
+- snapshot は `user-data/recovery/{snapshot_id}.json` に保存される (`snapshot_id` は `[A-Za-z0-9._-]{1,128}`)。
+- CLI commands: `save-recovery-snapshot`, `list-recovery-snapshots`, `delete-recovery-snapshot`.
+- レコードは `{ id, project, read_model, timestamp, confirmed_danger_frames }`。壊れた JSON は `list-recovery-snapshots` の `broken[]` に隔離される。
+- confirmed danger frames (書き出し前レビュー済みフレームのキー) は snapshot 側に保存する方針。project ファイルには載せない。
+
+### Danger warning flow (export 前)
+
+`window.confirm` は使わない。未確認の danger frame が残っている場合のみ 3 択 modal を開く:
+
+1. **詳細を確認 (書き出し中断)** — 最初の danger frame へ seek して書き出しをキャンセル。
+2. **そのまま書き出し (全件確認済み)** — 対象フレームを `confirmedDangerFrames` に追加して export へ進む。
+3. **キャンセル** — 何もしない。
 
 ## 10. Frontend 状態
 
@@ -208,13 +238,15 @@ Cancel は request-based。
   - file-backed recovery は `user-data/recovery/{id}.json` に移行、backend に `save/list/delete-recovery-snapshot` command あり
   - export 前 danger modal (詳細確認 / 書き出し / キャンセル) で `window.confirm` を置換
   - confirmed danger frames は recovery snapshot に保存 (project 本体は汚染しない)
-- export workflow completion
-  - export queue
-  - queue persistence / interrupted restore
-  - richer export settings / preset management
-- regression prevention
-  - Tauri E2E
-  - recovery / export output verification
+- export workflow completion — **部分完了 (2026-04-17)**
+  - multi-job export queue: `user-data/export-queue/queue.json` + frontend drive loop
+  - queue persistence / `running → interrupted` 復元 + `再実行` 導線
+  - user-defined export preset: `user-data/presets/{name}.json`、Export Settings Modal の preset セレクタ
+  - **残**: M-B03 (video codec / container / fps / quality 詳細)
+- regression prevention — **部分完了 (2026-04-17)**
+  - export output の複数フレーム差分検証 (M-E03)
+  - recovery の再起動シナリオ backend 検証 (M-E02 backend 部分)
+  - **残**: M-E01 Tauri 実ウィンドウ E2E (tauri-driver / playwright 導入が必要)
 - editing UX completion — **全項目完了 (M-C01〜M-C10)。目視レビュー待ち**
 - future feature track
   - AI detect performance tuning
