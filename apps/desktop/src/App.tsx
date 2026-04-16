@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { open, save } from "@tauri-apps/plugin-dialog";
+import { message as tauriMessage, open, save } from "@tauri-apps/plugin-dialog";
 import { CanvasStagePanel } from "./components/CanvasStagePanel";
 import { DetectorSettingsModal } from "./components/DetectorSettingsModal";
 import { ExportSettingsModal, type ExportSettings } from "./components/ExportSettingsModal";
@@ -279,9 +279,13 @@ export function App() {
 
   const [runtimeJobs, setRuntimeJobs] = useState<Record<string, RuntimeJobSummary>>({});
   const [detectJobs, setDetectJobs] = useState<Record<string, DetectJobSummary>>({});
-  // Ref that mirrors detectJobs so the window-close handler can read current
-  // value without being re-registered every time detectJobs changes.
+  // Refs that mirror state so the window-close handler can read current
+  // values without being re-registered every time state changes.
   const detectJobsRef = useRef(detectJobs);
+  const projectRef = useRef(project);
+  const readModelRef = useRef(readModel);
+  const projectDirtyRef = useRef(projectDirty);
+  const recoveryDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [activeExportJobId, setActiveExportJobId] = useState<string | null>(null);
   const [exportStatus, setExportStatus] = useState<ExportJobStatus | null>(null);
   const [exportCancelling, setExportCancelling] = useState(false);
@@ -1078,25 +1082,55 @@ export function App() {
     void runDoctor();
   }, []);
 
-  // Keep detectJobsRef in sync so the close handler always sees current jobs.
-  useEffect(() => {
-    detectJobsRef.current = detectJobs;
-  }, [detectJobs]);
+  // Keep refs in sync so the close handler always sees current state.
+  useEffect(() => { detectJobsRef.current = detectJobs; }, [detectJobs]);
+  useEffect(() => { projectRef.current = project; }, [project]);
+  useEffect(() => { readModelRef.current = readModel; }, [readModel]);
+  useEffect(() => { projectDirtyRef.current = projectDirty; }, [projectDirty]);
 
-  // On main window close: cancel any active detect jobs so detached worker
-  // processes receive the cancel flag before the app exits.
+  // On main window close: prompt to save unsaved changes, cancel active jobs, then exit.
   useEffect(() => {
     let unlisten: (() => void) | null = null;
     const win = getCurrentWindow();
     win.onCloseRequested(async (event) => {
       event.preventDefault();
+
+      const proj = projectRef.current;
+      const rm = readModelRef.current;
+      const dirty = projectDirtyRef.current;
+
+      if (dirty && proj) {
+        const decision = await tauriMessage(
+          "未保存の変更があります。保存してから終了しますか？",
+          {
+            title: "終了確認",
+            kind: "warning",
+            buttons: { yes: "保存して終了", no: "保存せずに終了", cancel: "キャンセル" },
+          },
+        );
+
+        if (decision === "Cancel") return;
+
+        if (decision === "Yes" && proj.project_path) {
+          await invoke("run_backend_command", {
+            command: "save-project",
+            payload: { project_path: proj.project_path, project: proj },
+          });
+        }
+
+        saveRecoverySnapshot(proj, rm);
+      }
+
       const activeJobs = Object.values(detectJobsRef.current).filter(
         (j) => isActiveDetectState(j.state),
       );
-      await Promise.allSettled(
-        activeJobs.map((j) => cancelDetectJob(backend, j.job_id)),
-      );
-      await win.destroy();
+      await Promise.race([
+        Promise.allSettled(
+          activeJobs.map((j) => cancelDetectJob(backend, j.job_id)),
+        ),
+        new Promise((resolve) => setTimeout(resolve, 3000)),
+      ]);
+      await invoke("exit_app");
     }).then((fn) => { unlisten = fn; });
     return () => { unlisten?.(); };
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1277,6 +1311,23 @@ export function App() {
       removeRecoverySnapshot(recoverySnapshotId(project));
     }
   }, [project, projectDirty]);
+
+  // Debounced recovery snapshot: update localStorage when project content
+  // changes while dirty, so force-kill loses at most ~5 seconds of work.
+  useEffect(() => {
+    if (!project || !projectDirty) return;
+    if (recoveryDebounceRef.current) clearTimeout(recoveryDebounceRef.current);
+    recoveryDebounceRef.current = setTimeout(() => {
+      recoveryDebounceRef.current = null;
+      try { saveRecoverySnapshot(project, readModel); } catch { /* quota — ignore */ }
+    }, 5_000);
+    return () => {
+      if (recoveryDebounceRef.current) {
+        clearTimeout(recoveryDebounceRef.current);
+        recoveryDebounceRef.current = null;
+      }
+    };
+  }, [project, readModel, projectDirty]);
 
   // Startup: check for recovery snapshot.
   useEffect(() => {

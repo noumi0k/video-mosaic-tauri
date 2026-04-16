@@ -322,6 +322,11 @@ fn resolve_bundled_tool(dir: &PathBuf, tool_name: &str) -> Option<PathBuf> {
 }
 
 #[tauri::command]
+fn exit_app(app: AppHandle) {
+    app.exit(0);
+}
+
+#[tauri::command]
 fn reveal_path_in_explorer(path: String) -> Result<(), String> {
     #[cfg(target_os = "windows")]
     {
@@ -356,7 +361,7 @@ fn reveal_path_in_explorer(path: String) -> Result<(), String> {
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
-        .invoke_handler(tauri::generate_handler![run_backend_command, reveal_path_in_explorer])
+        .invoke_handler(tauri::generate_handler![run_backend_command, reveal_path_in_explorer, exit_app])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
