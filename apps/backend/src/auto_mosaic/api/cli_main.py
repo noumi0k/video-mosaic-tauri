@@ -52,6 +52,9 @@ COMMAND_MODULES: dict[str, str] = {
     "update-export-queue-item": "update_export_queue_item",
     "remove-export-queue-item": "remove_export_queue_item",
     "clear-terminal-export-queue": "clear_terminal_export_queue",
+    "list-export-presets": "list_export_presets",
+    "save-export-preset": "save_export_preset",
+    "delete-export-preset": "delete_export_preset",
 }
 COMMAND_HANDLERS: dict[str, Callable[[dict], dict]] = {}
 

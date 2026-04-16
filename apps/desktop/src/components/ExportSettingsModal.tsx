@@ -1,10 +1,18 @@
 import { useEffect, useState } from "react";
 
+export type ExportPreset = {
+  name: string;
+  settings: ExportSettings;
+};
+
 type ExportSettingsModalProps = {
   open: boolean;
   onClose: () => void;
   onExport: (settings: ExportSettings) => void;
   defaultSettings: ExportSettings;
+  presets?: ExportPreset[];
+  onSavePreset?: (name: string, settings: ExportSettings) => Promise<void> | void;
+  onDeletePreset?: (name: string) => Promise<void> | void;
 };
 
 export type ExportSettings = {
@@ -15,13 +23,22 @@ export type ExportSettings = {
   encoder: "auto" | "gpu" | "cpu";
 };
 
-export function ExportSettingsModal({ open, onClose, onExport, defaultSettings }: ExportSettingsModalProps) {
+export function ExportSettingsModal({
+  open,
+  onClose,
+  onExport,
+  defaultSettings,
+  presets = [],
+  onSavePreset,
+  onDeletePreset,
+}: ExportSettingsModalProps) {
   const [resolution, setResolution] = useState(defaultSettings.resolution);
   const [mosaicStrength, setMosaicStrength] = useState(defaultSettings.mosaic_strength);
   const [audioMode, setAudioMode] = useState(defaultSettings.audio_mode);
   const [bitrateMode, setBitrateMode] = useState<"auto" | "manual">(defaultSettings.bitrate_kbps ? "manual" : "auto");
   const [bitrateKbps, setBitrateKbps] = useState(defaultSettings.bitrate_kbps ?? 16000);
   const [encoder, setEncoder] = useState<"auto" | "gpu" | "cpu">(defaultSettings.encoder ?? "auto");
+  const [selectedPreset, setSelectedPreset] = useState<string>("");
 
   useEffect(() => {
     if (!open) return;
@@ -31,24 +48,86 @@ export function ExportSettingsModal({ open, onClose, onExport, defaultSettings }
     setBitrateMode(defaultSettings.bitrate_kbps ? "manual" : "auto");
     setBitrateKbps(defaultSettings.bitrate_kbps ?? 16000);
     setEncoder(defaultSettings.encoder ?? "auto");
+    setSelectedPreset("");
   }, [defaultSettings, open]);
 
   if (!open) return null;
 
-  function handleSubmit() {
-    onExport({
+  function applyPreset(name: string) {
+    setSelectedPreset(name);
+    if (!name) return;
+    const preset = presets.find((p) => p.name === name);
+    if (!preset) return;
+    const s = preset.settings;
+    if (s.resolution) setResolution(s.resolution);
+    if (typeof s.mosaic_strength === "number") setMosaicStrength(s.mosaic_strength);
+    if (s.audio_mode) setAudioMode(s.audio_mode);
+    setBitrateMode(s.bitrate_kbps ? "manual" : "auto");
+    setBitrateKbps(s.bitrate_kbps ?? 16000);
+    if (s.encoder) setEncoder(s.encoder);
+  }
+
+  function currentSettings(): ExportSettings {
+    return {
       resolution,
       mosaic_strength: mosaicStrength,
       audio_mode: audioMode,
       bitrate_kbps: bitrateMode === "manual" ? bitrateKbps : null,
       encoder,
-    });
+    };
+  }
+
+  function handleSubmit() {
+    onExport(currentSettings());
+  }
+
+  async function handleSavePreset() {
+    if (!onSavePreset) return;
+    const name = window.prompt("プリセット名を入力してください");
+    if (!name) return;
+    const trimmed = name.trim();
+    if (!trimmed) return;
+    await onSavePreset(trimmed, currentSettings());
+    setSelectedPreset(trimmed);
+  }
+
+  async function handleDeletePreset() {
+    if (!onDeletePreset || !selectedPreset) return;
+    if (!window.confirm(`プリセット "${selectedPreset}" を削除しますか?`)) return;
+    await onDeletePreset(selectedPreset);
+    setSelectedPreset("");
   }
 
   return (
     <div className="nle-modal-overlay" onClick={onClose}>
       <div className="nle-modal" onClick={(e) => e.stopPropagation()} style={{ minWidth: 360 }}>
         <h3 style={{ margin: "0 0 12px" }}>書き出し設定</h3>
+
+        {onSavePreset ? (
+          <div className="nle-form-row">
+            <label className="nle-form-label">プリセット</label>
+            <select
+              className="nle-select"
+              value={selectedPreset}
+              onChange={(e) => applyPreset(e.target.value)}
+            >
+              <option value="">(現在の設定を使用)</option>
+              {presets.map((p) => (
+                <option key={p.name} value={p.name}>
+                  {p.name}
+                </option>
+              ))}
+            </select>
+            <button className="nle-btn nle-btn--small" onClick={() => void handleSavePreset()}>
+              現在の設定を保存
+            </button>
+            {selectedPreset ? (
+              <button className="nle-btn nle-btn--small" onClick={() => void handleDeletePreset()}>
+                削除
+              </button>
+            ) : null}
+          </div>
+        ) : null}
 
         <div className="nle-form-row">
           <label className="nle-form-label">解像度</label>

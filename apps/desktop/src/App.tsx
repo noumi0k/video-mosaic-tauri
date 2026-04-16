@@ -4,7 +4,7 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { message as tauriMessage, open, save } from "@tauri-apps/plugin-dialog";
 import { CanvasStagePanel } from "./components/CanvasStagePanel";
 import { DetectorSettingsModal } from "./components/DetectorSettingsModal";
-import { ExportSettingsModal, type ExportSettings } from "./components/ExportSettingsModal";
+import { ExportSettingsModal, type ExportPreset, type ExportSettings } from "./components/ExportSettingsModal";
 import { ShortcutHelpModal } from "./components/ShortcutHelpModal";
 import { usePersistedDetails } from "./hooks/usePersistedDetails";
 import { JobPanel } from "./components/JobPanel";
@@ -311,6 +311,7 @@ export function App() {
   const [exportModalOpen, setExportModalOpen] = useState(false);
   const [exportQueue, setExportQueue] = useState<ExportQueueItem[]>([]);
   const [activeQueueId, setActiveQueueId] = useState<string | null>(null);
+  const [exportPresets, setExportPresets] = useState<ExportPreset[]>([]);
   const [shortcutModalOpen, setShortcutModalOpen] = useState(false);
   const inspectorEnvironment = usePersistedDetails("environment", true);
   const inspectorDetect = usePersistedDetails("detect", true);
@@ -1515,7 +1516,32 @@ export function App() {
 
   useEffect(() => {
     void reloadExportQueue();
+    void reloadExportPresets();
   }, []);
+
+  async function reloadExportPresets() {
+    const response = await backend<{ items: ExportPreset[] }>("list-export-presets", {});
+    if (!response.ok) return;
+    setExportPresets(response.data.items);
+  }
+
+  async function handleSaveExportPreset(name: string, settings: ExportSettings) {
+    const response = await backend("save-export-preset", { name, settings });
+    if (!response.ok) {
+      setErrorMessage(prettyError(response.error));
+      return;
+    }
+    await reloadExportPresets();
+  }
+
+  async function handleDeleteExportPreset(name: string) {
+    const response = await backend("delete-export-preset", { name });
+    if (!response.ok) {
+      setErrorMessage(prettyError(response.error));
+      return;
+    }
+    await reloadExportPresets();
+  }
 
   useEffect(() => {
     let cancelled = false;
@@ -2441,6 +2467,9 @@ export function App() {
         onClose={() => setExportModalOpen(false)}
         onExport={(s) => void handleExportWithSettings(s)}
         defaultSettings={exportSettings}
+        presets={exportPresets}
+        onSavePreset={handleSaveExportPreset}
+        onDeletePreset={handleDeleteExportPreset}
       />
 
       <ShortcutHelpModal open={shortcutModalOpen} onClose={() => setShortcutModalOpen(false)} />

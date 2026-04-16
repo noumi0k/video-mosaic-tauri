@@ -3,7 +3,8 @@
 > 位置づけ: このファイルは直近作業の handoff log です。現行実装の正本は `docs/engineering/current-implementation.md`、実装済み / 未実装 backlog の正本は `docs/project/unimplemented-features.md` です。末尾の Next Logical Step は作成時点の履歴として扱い、現在の作業判断では正本を優先してください。
 
 ## Snapshot
-- **Phase B core 完了 (2026-04-17 5th pass)**: export queue の file-backed 実装、frontend drive loop、queue UI を追加。残は M-B03 (settings 拡張) と M-B04 (preset)。
+- **Phase B: M-B04 preset 追加 (2026-04-17 6th)**: user-defined preset の save / list / delete + UI。M-B03 (codec/container 詳細) は別パス。
+- **Phase B core 完了 (2026-04-17 5th pass)**: export queue の file-backed 実装、frontend drive loop、queue UI を追加。
 - **Phase A 完了 (2026-04-17 4th pass)**: crash recovery を file-backed (`save/list/delete-recovery-snapshot`) に移行、3 択 danger modal、confirmed danger frames は recovery snapshot に保存。Phase B (export queue) へ進む準備が整った。
 - **Phase D 全 10 項目達成 (2026-04-17 3rd pass)**: M-C08 diff overlay も実装 (Shift+M で全 visible + export_enabled track の resolve_for_render 結果を canvas に半透明マゼンタで重ねる)。コード実装は Phase D 完了。次は Tauri ウィンドウでの目視レビュー。
 - Phase D 完了 pass (2026-04-17 2nd): M-C06 の preview mode badge、M-C07 onion skin、M-C09 UI 言語切替を追加。
@@ -28,6 +29,27 @@
   - `python -m pytest tests/test_domain_track.py -k "held_segments_do_not_hide_detector_keyframe_span"` passed
   - `python -m pytest tests/test_mask_continuity.py -k "held_segment_does_not_hide_accepted_detector_keyframes"` passed
 - Current desktop build status on April 16, 2026: `npm.cmd run build` in `apps/desktop` passed.
+
+## What Was Added In This Pass (April 17, 2026 6th — Phase B: user-defined export presets (M-B04))
+
+### スコープ
+Phase B 内の M-B04 (user-defined export preset) を追加実装。保存 / 選択 / 削除の最小 CRUD が通る。
+
+### Backend
+- `apps/backend/src/auto_mosaic/api/commands/_export_presets.py` 新規: preset IO ヘルパー (save / list / delete)。`user-data/presets/{name}.json` 形式。name は `[A-Za-z0-9 ._-]{1,128}` に限定
+- dispatcher 向けに `list_export_presets.py` / `save_export_preset.py` / `delete_export_preset.py` を追加し `cli_main.py` に登録
+
+### Frontend
+- `components/ExportSettingsModal.tsx`: `presets` / `onSavePreset` / `onDeletePreset` props を追加、プリセット dropdown + 保存 / 削除ボタン
+- `App.tsx`: `exportPresets` state、起動時に `list-export-presets` 呼び出し、`handleSaveExportPreset` / `handleDeleteExportPreset`
+
+### 検証
+- `npm.cmd run build` passed
+
+### M-B03 について
+- video codec / container / fps / quality の詳細設定は FFmpeg 分岐の改修が大きいため今パスでは見送り (partial のまま)。既存の resolution / bitrate / encoder で代用可能
+
+---
 
 ## What Was Added In This Pass (April 17, 2026 5th — Phase B core: export queue + UI)
 
