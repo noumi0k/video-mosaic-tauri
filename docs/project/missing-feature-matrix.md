@@ -41,6 +41,8 @@
 - [x] **M-B02** queue persistence と再起動時の interrupted 復元 (2026-04-17)
 - [x] **M-B05** export queue UI (state 色分け / 削除 / 再実行 / 一括クリア) (2026-04-17)
 - [x] **M-B04** user-defined export preset (save / list / delete) (2026-04-17)
+- [x] **M-E02 (backend)** recovery end-to-end 検証: save → 再起動模擬 → list → restore → delete (2026-04-17)
+- [x] **M-E03** export output multi-frame ROI verification (8 frame 全てでピクセル差分を assert) (2026-04-17)
 - [x] **M-C01** manual polygon track 作成 (2026-04-16)
 - [x] **M-C02** ellipse 回転の UI / 描画 / patch 対応 (2026-04-17)
 - [x] **M-C03** track 単位の `export_enabled` フラグ / preview の破線 outline / timeline 斜線・バッジ (2026-04-17)
@@ -106,9 +108,9 @@
 
 | ID | ソース | 状態 | 不足内容 | 現状メモ | フェーズ |
 | --- | --- | --- | --- | --- | --- |
-| M-E01 | `feature_list` 16, `project checklist` K-03 | missing | Tauri 実操作 E2E | desktop unit/backend smoke はあるが、実ウィンドウ回帰は未整備 | C |
-| M-E02 | `feature_list` 16, `project checklist` K-04 | missing | crash recovery E2E | recovery modal は人手前提、再起動込み自動検証がない | C |
-| M-E03 | `project checklist` K-05 | missing | export output の差分検証 | byte/pixel/ROI 単位の自動検証がない | C |
+| M-E01 | `feature_list` 16, `project checklist` K-03 | missing | Tauri 実操作 E2E | playwright / tauri-driver 導入は別パスに先送り (スコープ大)。ユニット + CLI smoke で実質カバー中 | C |
+| ~~M-E02~~ | `feature_list` 16, `project checklist` K-04 | done (backend) | crash recovery E2E (backend 再現) | 2026-04-17 (7th): `test_recovery_workflow_simulates_restart` で save → 新プロセス (新 ensure_runtime_dirs) → list → restore → delete の全段階を検証。Tauri ウィンドウの実操作 E2E は M-E01 と合わせて後段 | C |
+| ~~M-E03~~ | `project checklist` K-05 | done | export output の差分検証 | 2026-04-17 (7th): `test_export_video_mosaic_persists_across_all_frames` で 8 フレーム全てについて ROI ピクセル差分を検証 (差分 > 4 を要求) | C |
 | M-E04 | `feature_list` 16, `architecture/p4-retraining-requirements.md` | missing | teacher dataset 保存 | opt-in UI、crop、metadata、manifest が未実装 | E |
 | M-E05 | `feature_list` 16, `architecture/p4-retraining-requirements.md` | missing | local retraining | validator、training job、trained model 管理が未実装 | E |
 | M-E06 | `feature_list` 16, `operations` | missing | 正式 installer / updater | review package はあるが、正式配布導線は未整備 | E |

@@ -18,7 +18,7 @@
 | --- | --- | --- |
 | A | Persistent workflow completion (recovery / review safety) | 完了 (M-A01〜M-A04) |
 | B | Export workflow completion (queue / preset) | 部分完了 (M-B01/B02/B04/B05 完了、M-B03 codec/container 詳細は別パス) |
-| C | Regression & verification (Tauri E2E / output verify) | 未着手 |
+| C | Regression & verification (Tauri E2E / output verify) | 部分完了 (M-E02 backend / M-E03 完了、M-E01 Tauri 実ウィンドウ E2E は別パス) |
 | **D** | **Editing UX completion (M-C01〜M-C10)** | **コード実装完了、目視レビュー待ち** |
 | E | AI / data / distribution | 未着手 |
 

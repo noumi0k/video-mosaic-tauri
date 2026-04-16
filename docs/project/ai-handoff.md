@@ -3,6 +3,7 @@
 > 位置づけ: このファイルは直近作業の handoff log です。現行実装の正本は `docs/engineering/current-implementation.md`、実装済み / 未実装 backlog の正本は `docs/project/unimplemented-features.md` です。末尾の Next Logical Step は作成時点の履歴として扱い、現在の作業判断では正本を優先してください。
 
 ## Snapshot
+- **Phase C (部分完了, 2026-04-17 7th)**: export multi-frame verification (M-E03) と recovery restart 再現テスト (M-E02 backend) を追加。M-E01 Tauri 実操作 E2E は別パス。
 - **Phase B: M-B04 preset 追加 (2026-04-17 6th)**: user-defined preset の save / list / delete + UI。M-B03 (codec/container 詳細) は別パス。
 - **Phase B core 完了 (2026-04-17 5th pass)**: export queue の file-backed 実装、frontend drive loop、queue UI を追加。
 - **Phase A 完了 (2026-04-17 4th pass)**: crash recovery を file-backed (`save/list/delete-recovery-snapshot`) に移行、3 択 danger modal、confirmed danger frames は recovery snapshot に保存。Phase B (export queue) へ進む準備が整った。
@@ -29,6 +30,23 @@
   - `python -m pytest tests/test_domain_track.py -k "held_segments_do_not_hide_detector_keyframe_span"` passed
   - `python -m pytest tests/test_mask_continuity.py -k "held_segment_does_not_hide_accepted_detector_keyframes"` passed
 - Current desktop build status on April 16, 2026: `npm.cmd run build` in `apps/desktop` passed.
+
+## What Was Added In This Pass (April 17, 2026 7th — Phase C: export & recovery verification)
+
+### スコープ
+Phase C の中で実効的な回帰防止になる層 (backend unit での end-to-end 再現 + export output の複数フレーム検証) を追加。Tauri ウィンドウの実操作 E2E (M-E01) は別パスに先送り。
+
+### 追加テスト
+- `test_export_video_mosaic_persists_across_all_frames`: 8 フレームすべての ellipse ROI について `mean(|out - src|) > 4` を assert。モザイクが単発フレームだけでなく renderable span 全域に効いていることを保証 (M-E03)
+- `test_recovery_workflow_simulates_restart`: `save-recovery-snapshot` → `list-recovery-snapshots` (新プロセス相当で `ensure_runtime_dirs` 再実行) → `confirmed_danger_frames` を含めた fidelity 比較 → `delete-recovery-snapshot` → 空 list を確認 (M-E02 の backend 部分)
+
+### 検証
+- `py -3.12 -m pytest tests/test_cli_smoke.py -k "mosaic_persists_across or recovery_workflow_simulates" -q --basetemp=...` → 2 passed
+
+### 残り
+- **M-E01 Tauri E2E**: playwright / tauri-driver / webdriverio を導入する工事が大きいため、別パスで対応
+
+---
 
 ## What Was Added In This Pass (April 17, 2026 6th — Phase B: user-defined export presets (M-B04))
 

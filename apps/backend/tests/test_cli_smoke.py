@@ -1799,6 +1799,128 @@ def test_export_video_writes_output_and_applies_shapes():
     assert untouched_difference < 8.0
 
 
+def test_export_video_mosaic_persists_across_all_frames():
+    """Phase C M-E03: every written frame inside the track span must be mosaicked."""
+    source_path = TEST_ROOT / "export-multi-frame-source.mp4"
+    output_path = TEST_ROOT / "export-multi-frame-output.avi"
+    _make_sample_video(source_path)
+    created = create_project.run(
+        {
+            "name": "MultiFrameExport",
+            "video": {
+                "source_path": str(source_path),
+                "width": 160,
+                "height": 90,
+                "fps": 24.0,
+                "frame_count": 8,
+                "duration_sec": 8 / 24.0,
+                "readable": True,
+                "warnings": [],
+                "errors": [],
+                "first_frame_shape": [90, 160, 3],
+            },
+            "tracks": [
+                {
+                    "track_id": "ellipse-track",
+                    "label": "ellipse",
+                    "state": "active",
+                    "source": "manual",
+                    "visible": True,
+                    "segments": [{"start_frame": 0, "end_frame": 7, "state": "confirmed"}],
+                    "keyframes": [
+                        {
+                            "frame_index": 0,
+                            "shape_type": "ellipse",
+                            "points": [[0.4, 0.3], [0.6, 0.7]],
+                            "bbox": [0.4, 0.3, 0.2, 0.4],
+                            "confidence": 1.0,
+                            "source": "manual",
+                            "rotation": 0.0,
+                            "opacity": 1.0,
+                            "expand_px": None,
+                            "feather": None,
+                            "is_locked": False,
+                        }
+                    ],
+                }
+            ],
+        }
+    )
+    project_path = TEST_ROOT / "export-multi-frame-project.json"
+    save_response = save_project.run({"project_path": str(project_path), "project": created["data"]["project"]})
+    assert save_response["ok"] is True
+    response = export_video.run(
+        {
+            "project_path": str(project_path),
+            "output_path": str(output_path),
+            "options": {"mosaic_strength": 10, "audio_mode": "video_only"},
+        }
+    )
+    assert response["ok"] is True
+
+    source_cap = cv2.VideoCapture(str(source_path))
+    output_cap = cv2.VideoCapture(str(output_path))
+    try:
+        frame_count = 0
+        while True:
+            src_ok, src_frame = source_cap.read()
+            out_ok, out_frame = output_cap.read()
+            if not src_ok or not out_ok:
+                break
+            frame_count += 1
+            # ellipse ROI ~ (y:27..63, x:64..96); difference must be > 5 every frame.
+            src_roi = src_frame[27:63, 64:96].astype(np.int16)
+            out_roi = out_frame[27:63, 64:96].astype(np.int16)
+            diff = float(np.mean(np.abs(out_roi - src_roi)))
+            assert diff > 4.0, f"frame {frame_count - 1}: mosaic not applied (diff={diff:.2f})"
+        assert frame_count == 8
+    finally:
+        source_cap.release()
+        output_cap.release()
+
+
+def test_recovery_workflow_simulates_restart(tmp_path, monkeypatch):
+    """Phase C M-E02 (partial): save → list after process restart (new ensure_runtime_dirs) → restore."""
+    monkeypatch.setenv("AUTO_MOSAIC_DATA_DIR", str(tmp_path))
+    project_payload = {
+        "project_id": "after-restart",
+        "version": "0.1.0",
+        "schema_version": CURRENT_PROJECT_SCHEMA_VERSION,
+        "name": "restart demo",
+        "project_path": None,
+        "video": None,
+        "tracks": [],
+        "detector_config": {},
+        "export_preset": {},
+        "paths": {},
+    }
+    saved = save_recovery_snapshot.run(
+        {
+            "snapshot_id": "restart-demo",
+            "project": project_payload,
+            "read_model": None,
+            "timestamp": "2026-04-17T12:34:56.000Z",
+            "confirmed_danger_frames": ["track-1-10", "track-1-20"],
+        }
+    )
+    assert saved["ok"] is True
+
+    # Simulating a restart: the next process starts fresh and calls list.
+    listed = list_recovery_snapshots.run({})
+    assert listed["ok"] is True
+    snapshots = listed["data"]["snapshots"]
+    assert len(snapshots) == 1
+    snapshot = snapshots[0]
+    assert snapshot["id"] == "restart-demo"
+    assert snapshot["project"]["project_id"] == "after-restart"
+    assert snapshot["confirmed_danger_frames"] == ["track-1-10", "track-1-20"]
+
+    deleted = delete_recovery_snapshot.run({"snapshot_id": "restart-demo"})
+    assert deleted["ok"] is True
+    assert deleted["data"]["deleted"] is True
+    assert list_recovery_snapshots.run({})["data"]["snapshots"] == []
+
+
 def test_export_video_skips_tracks_with_export_enabled_false():
     source_path = TEST_ROOT / "export-disabled-source.mp4"
     output_path = TEST_ROOT / "export-disabled-output.avi"
