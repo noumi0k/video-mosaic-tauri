@@ -1413,7 +1413,37 @@ class TestResolveForRenderExportSafety:
 
 
 # ---------------------------------------------------------------------------
-# W7: resolve_for_render — purity
+# W7: resolve_for_render - generated segment repair
+# ---------------------------------------------------------------------------
+
+class TestResolveForRenderGeneratedSegments:
+    def test_held_segment_does_not_hide_accepted_detector_keyframes(self):
+        # Detection can create held/uncertain segments for weak frames while
+        # accepted keyframes remain the authoritative render span.
+        a = _kf(0, "detector", shape_type="polygon")
+        b = _kf(6, "detector", shape_type="polygon")
+        track = MaskTrack(
+            track_id="detector-track",
+            label="detector",
+            state="detected",
+            source="detector",
+            keyframes=[a, b],
+            segments=[_seg(2, 4, "held")],
+        )
+
+        start_result = resolve_for_render(track, 0)
+        held_result = resolve_for_render(track, 3)
+        end_result = resolve_for_render(track, 6)
+
+        assert start_result is not None
+        assert start_result[1] == ResolveReason.EXPLICIT
+        assert held_result is not None
+        assert end_result is not None
+        assert end_result[1] == ResolveReason.EXPLICIT
+
+
+# ---------------------------------------------------------------------------
+# W7: resolve_for_render - purity
 # ---------------------------------------------------------------------------
 
 class TestResolveForRenderPurity:

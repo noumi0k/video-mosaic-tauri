@@ -7,9 +7,10 @@ import {
   interpolateEllipse,
   planCommitMutation,
   resolveForEditing,
+  resolveForRender,
   resolveShapeForEditing,
 } from "../src/maskShapeResolver.ts";
-import type { Keyframe, KeyframeSummary } from "../src/types.ts";
+import type { Keyframe, KeyframeSummary, MaskSegment, MaskTrack } from "../src/types.ts";
 
 function kf(frame: number, source: string = "manual"): Keyframe {
   return {
@@ -30,6 +31,23 @@ function kf(frame: number, source: string = "manual"): Keyframe {
 
 function kfSummary(frame: number, source: string = "manual"): KeyframeSummary {
   return { frame_index: frame, source, shape_type: "polygon" };
+}
+
+function trackWith(keyframes: Keyframe[], segments: MaskSegment[] = []): MaskTrack {
+  return {
+    track_id: "track-1",
+    label: "Track 1",
+    state: "active",
+    source: keyframes.some((item) => item.source === "manual") ? "manual" : "detector",
+    visible: true,
+    keyframes,
+    label_group: "",
+    user_locked: false,
+    user_edited: keyframes.some((item) => item.source === "manual"),
+    confidence: 1,
+    style: {},
+    segments,
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -402,6 +420,36 @@ test("resolveForEditing: interpolated kf has correct source", () => {
   const result = resolveForEditing([ellipseKf(0), ellipseKf(10)], 5);
   assert.equal(result?.reason, "interpolated");
   assert.equal(result?.keyframe.source, "detector");
+});
+
+test("resolveForRender: after last keyframe returns null", () => {
+  const result = resolveForRender(trackWith([kf(10), kf(20)]), 100);
+  assert.equal(result, null);
+});
+
+test("resolveForRender: segment gap still gates rendering", () => {
+  const result = resolveForRender(
+    trackWith(
+      [kf(0), kf(4)],
+      [
+        { start_frame: 0, end_frame: 1, state: "confirmed" },
+        { start_frame: 4, end_frame: 5, state: "confirmed" },
+      ],
+    ),
+    2,
+  );
+  assert.equal(result, null);
+});
+
+test("resolveForRender: held metadata does not hide detector keyframe span", () => {
+  const detectorTrack = trackWith(
+    [kf(0, "detector"), kf(6, "detector")],
+    [{ start_frame: 2, end_frame: 4, state: "held" }],
+  );
+
+  assert.equal(resolveForRender(detectorTrack, 0)?.reason, "explicit");
+  assert.equal(resolveForRender(detectorTrack, 3)?.reason, "held_from_prior");
+  assert.equal(resolveForRender(detectorTrack, 6)?.reason, "explicit");
 });
 
 // ---------------------------------------------------------------------------

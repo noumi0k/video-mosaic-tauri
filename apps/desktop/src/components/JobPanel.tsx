@@ -5,6 +5,7 @@ type JobPanelProps = {
   jobs: JobProgressView[];
   onCancel: (job: JobProgressView) => void;
   onDismiss: (jobId: string) => void;
+  onOpenFolder?: (job: JobProgressView) => void;
 };
 
 function stateLabel(state: JobProgressView["state"]): string {
@@ -39,6 +40,7 @@ const TERMINAL_STATES: ReadonlySet<JobProgressView["state"]> = new Set([
 ]);
 
 export function JobPanel(props: JobPanelProps) {
+  const { onOpenFolder } = props;
   if (!props.jobs.length) return null;
 
   return (
@@ -81,6 +83,11 @@ export function JobPanel(props: JobPanelProps) {
                 {job.can_cancel ? (
                   <button className="nle-btn nle-btn--small nle-btn--cancel" onClick={() => props.onCancel(job)}>
                     {uiText.actions.cancel}
+                  </button>
+                ) : null}
+                {job.state === "completed" && job.job_kind === "export" && job.output_path && onOpenFolder ? (
+                  <button className="nle-btn nle-btn--small" onClick={() => onOpenFolder(job)} title={job.output_path ?? undefined}>
+                    フォルダを開く
                   </button>
                 ) : null}
               </div>

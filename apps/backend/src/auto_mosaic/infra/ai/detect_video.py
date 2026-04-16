@@ -497,6 +497,29 @@ def _session_device_label(session_providers: list[str]) -> str:
     return "CPU"
 
 
+def _preload_onnxruntime_cuda_dlls(ort: Any) -> dict[str, Any]:
+    preload = {
+        "available": hasattr(ort, "preload_dlls"),
+        "called": False,
+        "ok": False,
+        "error": None,
+    }
+    if not preload["available"]:
+        return preload
+
+    try:
+        # Match gpu-status diagnostics. onnxruntime-gpu wheels can depend on
+        # NVIDIA site-package DLLs that are not on the normal Windows DLL path.
+        ort.preload_dlls(directory="")
+        preload["called"] = True
+        preload["ok"] = True
+    except Exception as exc:
+        preload["called"] = True
+        preload["error"] = str(exc)
+        _log(f"[device] onnxruntime CUDA DLL preload failed: {exc}")
+    return preload
+
+
 def _build_session(
     model_path: Path,
     device_pref: str = "auto",
@@ -511,6 +534,7 @@ def _build_session(
             {"reason": str(exc)},
         ) from exc
 
+    cuda_preload = _preload_onnxruntime_cuda_dlls(ort)
     preferred, device = _preferred_providers()
     if device_pref == "cpu":
         preferred = ["CPUExecutionProvider"]
@@ -520,7 +544,11 @@ def _build_session(
             raise DetectVideoError(
                 "CUDA_PROVIDER_UNAVAILABLE",
                 "CUDAExecutionProvider is unavailable. Retry with CPU or auto mode.",
-                {"requested_device": device_pref, "available_providers": ort.get_available_providers()},
+                {
+                    "requested_device": device_pref,
+                    "available_providers": ort.get_available_providers(),
+                    "cuda_preload": cuda_preload,
+                },
             )
         preferred = ["CUDAExecutionProvider", "CPUExecutionProvider"]
         device = "gpu"
@@ -549,6 +577,7 @@ def _build_session(
                 "cuda_preflight_ok": "CUDAExecutionProvider" in preferred,
                 "fallback_allowed": device_pref != "cuda",
                 "provider_list": ort.get_available_providers(),
+                "cuda_preload": cuda_preload,
                 "failure_reason": str(exc),
                 # Legacy fields kept for backward compat
                 "requested_device": device_pref,
@@ -569,6 +598,7 @@ def _build_session(
                 "cuda_preflight_ok": "CUDAExecutionProvider" in preferred,
                 "fallback_allowed": False,
                 "provider_list": session_providers,
+                "cuda_preload": cuda_preload,
                 "failure_reason": (
                     "Session was created but CUDAExecutionProvider was not used. "
                     "This typically indicates a missing or incompatible CUDA DLL."

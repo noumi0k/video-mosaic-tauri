@@ -580,6 +580,25 @@ class MaskTrack:
     def render_segments(self) -> list[MaskSegment]:
         explicit_segments = [segment for segment in self.segments if segment.is_renderable()]
         if explicit_segments:
+            if self.keyframes and any(segment.state in {"held", "uncertain"} for segment in explicit_segments):
+                first_frame = self.keyframes[0].frame_index
+                last_frame = self.keyframes[-1].frame_index
+                keyframe_span_is_covered = any(
+                    segment.start_frame <= first_frame and segment.end_frame >= last_frame
+                    for segment in explicit_segments
+                )
+                if not keyframe_span_is_covered:
+                    # held/uncertain segments are detection-continuity metadata. They
+                    # must not become the only renderable range and hide accepted
+                    # keyframes during export.
+                    state = "confirmed" if any(kf.source == "manual" for kf in self.keyframes) else "detected"
+                    return sorted(
+                        [
+                            *explicit_segments,
+                            MaskSegment(start_frame=first_frame, end_frame=last_frame, state=state),
+                        ],
+                        key=lambda item: (item.start_frame, item.end_frame),
+                    )
             return explicit_segments
         if not self.keyframes:
             return []

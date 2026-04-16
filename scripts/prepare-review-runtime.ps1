@@ -66,6 +66,64 @@ function Get-VendorAbi {
   return $abiArray[0]
 }
 
+function Remove-BundledPythonPackage {
+  param(
+    [string]$PythonTarget,
+    [string[]]$Patterns
+  )
+  $sitePackages = Join-Path $PythonTarget "Lib\site-packages"
+  if (-not (Test-Path -LiteralPath $sitePackages -PathType Container)) {
+    return
+  }
+  foreach ($pattern in $Patterns) {
+    Get-ChildItem -LiteralPath $sitePackages -Filter $pattern -Force -ErrorAction SilentlyContinue | ForEach-Object {
+      Write-Host "  Removing bundled Python package shadow: $($_.Name)"
+      Remove-Item -LiteralPath $_.FullName -Recurse -Force
+    }
+  }
+}
+
+function Test-ReviewOnnxRuntime {
+  param(
+    [string]$BundledPython,
+    [string]$BackendTarget
+  )
+  $backendSrc = Join-Path $BackendTarget "src"
+  $probeCode = @"
+import json
+import sys
+sys.path.insert(0, r'$backendSrc')
+from auto_mosaic.runtime.bootstrap import bootstrap_backend_environment
+bootstrap = bootstrap_backend_environment()
+import onnxruntime as ort
+print(json.dumps({
+    'onnxruntime_file': ort.__file__,
+    'onnxruntime_version': ort.__version__,
+    'providers': ort.get_available_providers(),
+    'bootstrap': bootstrap,
+}, ensure_ascii=False))
+"@
+  $probeJson = & $BundledPython -c $probeCode
+  if ($LASTEXITCODE -ne 0 -or -not $probeJson) {
+    throw "review-runtime ONNX Runtime probe failed (exit $LASTEXITCODE)."
+  }
+  $probe = $probeJson | ConvertFrom-Json
+  $vendorHasGpu = @(Get-ChildItem -LiteralPath (Join-Path $BackendTarget "vendor") -Filter "onnxruntime_gpu-*.dist-info" -Force -ErrorAction SilentlyContinue).Count -gt 0
+  $providers = @($probe.providers)
+  if ($vendorHasGpu -and ($providers -notcontains "CUDAExecutionProvider")) {
+    throw @"
+review-runtime GPU package is present, but CUDAExecutionProvider is not available.
+onnxruntime_file: $($probe.onnxruntime_file)
+providers       : $($providers -join ', ')
+
+This package would silently run detection on CPU. Rebuild apps/backend/vendor/
+with onnxruntime-gpu[cuda,cudnn] and ensure the vendored NVIDIA DLL directories
+are included before shipping.
+"@
+  }
+  return $probe
+}
+
 function Resolve-ReviewPython {
   param([string]$TargetMinor)
 
@@ -83,8 +141,16 @@ function Resolve-ReviewPython {
   $pyCmd = Get-Command py.exe -ErrorAction SilentlyContinue
   if ($pyCmd) {
     $argList = @("-$TargetMinor", "-c", "import sys; print(sys.executable)")
-    $launched = & py.exe @argList 2>$null
-    if ($LASTEXITCODE -eq 0 -and $launched) {
+    $launched = $null
+    $pyExitCode = 1
+    try {
+      $launched = & py.exe @argList 2>$null
+      $pyExitCode = $LASTEXITCODE
+    } catch {
+      $launched = $null
+      $pyExitCode = 1
+    }
+    if ($pyExitCode -eq 0 -and $launched) {
       $candidate = $launched.Trim()
       if (Test-PythonExe -Path $candidate) {
         Write-Host "  Found Python $TargetMinor via py launcher: $candidate"
@@ -232,6 +298,17 @@ if (Test-Path $libSource) {
   }
 }
 
+# Use backend/vendor as the single ONNX Runtime source in review builds.
+# A developer Python install may contain CPU-only onnxruntime in site-packages;
+# copying it into the bundled Python can shadow the vendored GPU runtime before
+# backend bootstrap runs.  Remove these shadows immediately after Lib copy.
+Remove-BundledPythonPackage -PythonTarget $pythonTarget -Patterns @(
+  "onnxruntime",
+  "onnxruntime-*.dist-info",
+  "onnxruntime_gpu-*.dist-info",
+  "onnxruntime_directml-*.dist-info"
+)
+
 Get-ChildItem -LiteralPath (Join-Path $backendRoot "src") -Force | ForEach-Object {
   Copy-Item -LiteralPath $_.FullName -Destination (Join-Path $backendTarget "src") -Recurse -Force
 }
@@ -240,6 +317,13 @@ if (Test-Path (Join-Path $backendRoot "vendor")) {
     Copy-Item -LiteralPath $_.FullName -Destination (Join-Path $backendTarget "vendor") -Recurse -Force
   }
 }
+
+$bundledPython = Join-Path $pythonTarget "python.exe"
+$onnxruntimeProbe = Test-ReviewOnnxRuntime -BundledPython $bundledPython -BackendTarget $backendTarget
+Write-Host "ONNX Runtime probe passed:"
+Write-Host "  File     : $($onnxruntimeProbe.onnxruntime_file)"
+Write-Host "  Version  : $($onnxruntimeProbe.onnxruntime_version)"
+Write-Host "  Providers: $(@($onnxruntimeProbe.providers) -join ', ')"
 
 # ---------------------------------------------------------------------------
 # EraX PT -> ONNX 事前変換 (A 案 / 2026-04-11)
@@ -317,6 +401,9 @@ $manifest = @{
   python_source        = $pythonExe
   vendor_abi           = $vendorAbi
   abi_check_passed     = $true
+  onnxruntime_file      = $onnxruntimeProbe.onnxruntime_file
+  onnxruntime_version   = $onnxruntimeProbe.onnxruntime_version
+  onnxruntime_providers = @($onnxruntimeProbe.providers)
 }
 
 $manifest | ConvertTo-Json -Depth 4 | Set-Content -Path (Join-Path $resourceRoot "manifest.json") -Encoding UTF8

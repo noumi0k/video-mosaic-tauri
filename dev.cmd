@@ -1,3 +1,3 @@
 @echo off
 cd /d "%~dp0"
-npm run desktop:dev
+npm --workspace apps/desktop run dev:cuda

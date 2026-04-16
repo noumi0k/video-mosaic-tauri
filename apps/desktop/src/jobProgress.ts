@@ -74,6 +74,7 @@ export function normalizeExportJob(params: { jobId: string; status: ExportJobSta
     is_indeterminate: false,
     can_cancel: !params.cancelling && state !== "completed" && state !== "cancelled" && state !== "failed",
     subtitle: subtitleFromCounts(status?.frames_written ?? null, status?.total_frames ?? null),
+    output_path: status?.output_path ?? null,
   };
 }
 

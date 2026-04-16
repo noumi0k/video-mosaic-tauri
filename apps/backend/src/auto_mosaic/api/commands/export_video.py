@@ -7,6 +7,7 @@ from auto_mosaic.infra.video.export import export_project_video
 
 DEFAULT_MOSAIC_STRENGTH = 12
 VALID_AUDIO_MODES = {"mux_if_possible", "video_only"}
+VALID_ENCODERS = {"auto", "gpu", "cpu"}
 
 
 def run(payload: dict) -> dict:
@@ -57,6 +58,10 @@ def run(payload: dict) -> dict:
         except (TypeError, ValueError):
             bitrate_kbps = None
 
+    encoder = str(options.get("encoder", "auto"))
+    if encoder not in VALID_ENCODERS:
+        encoder = "auto"
+
     job_id = payload.get("job_id")
     if job_id is not None:
         job_id = str(job_id)
@@ -69,6 +74,7 @@ def run(payload: dict) -> dict:
         job_id=job_id,
         resolution=resolution,
         bitrate_kbps=bitrate_kbps,
+        encoder=encoder,
     )
     if result["ok"]:
         return success("export-video", result["data"], result["warnings"])

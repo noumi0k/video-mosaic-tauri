@@ -11,6 +11,7 @@
     "test:state": "node --test --experimental-strip-types tests/saveWorkflow.test.ts",
     "preview": "vite preview",
     "tauri": "tauri",
+    "dev:cuda": "powershell -ExecutionPolicy Bypass -File ..\\..\\scripts\\start-desktop-dev-cuda.ps1",
     "review:runtime": "powershell -ExecutionPolicy Bypass -File ..\\..\\scripts\\prepare-review-runtime.ps1",
     "review:bundle": "npm.cmd run review:runtime && tauri build",
     "review:portable": "npm.cmd run review:runtime && npm.cmd exec -- tauri build --no-bundle --ci && powershell -ExecutionPolicy Bypass -File ..\\..\\scripts\\assemble-review-package.ps1",

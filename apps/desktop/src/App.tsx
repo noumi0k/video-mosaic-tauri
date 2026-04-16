@@ -6,6 +6,7 @@ import { CanvasStagePanel } from "./components/CanvasStagePanel";
 import { DetectorSettingsModal } from "./components/DetectorSettingsModal";
 import { ExportSettingsModal, type ExportSettings } from "./components/ExportSettingsModal";
 import { JobPanel } from "./components/JobPanel";
+import { MosaicPreviewCanvas } from "./components/MosaicPreviewCanvas";
 import { KeyframeDetailPanel } from "./components/KeyframeDetailPanel";
 import { TimelineView } from "./components/TimelineView";
 import { TrackDetailPanel } from "./components/TrackDetailPanel";
@@ -291,6 +292,7 @@ export function App() {
     mosaic_strength: 12,
     audio_mode: "mux_if_possible",
     bitrate_kbps: null,
+    encoder: "auto",
   });
 
   // In/Out frame markers for range detection
@@ -319,6 +321,9 @@ export function App() {
   const [dismissedJobIds, setDismissedJobIds] = useState<Set<string>>(new Set());
   const scheduledDismissRef = useRef<Set<string>>(new Set());
   const dismissTimersRef = useRef<Map<string, ReturnType<typeof window.setTimeout>>>(new Map());
+
+  // モザイクプレビュートグル
+  const [mosaicPreviewEnabled, setMosaicPreviewEnabled] = useState(false);
 
   // 動画プレーヤー ref（再生位置同期用）
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -988,10 +993,9 @@ export function App() {
         return;
       }
     }
-    const projectPath = project.project_path ?? (await (async () => {
-      setActivity(uiText.activity.savingBeforeExport);
-      return handleSaveProject(false);
-    })());
+    // 常に最新編集を保存してからエクスポートする
+    setActivity(uiText.activity.savingBeforeExport);
+    const projectPath = await handleSaveProject(false);
     if (!projectPath) {
       setErrorMessage(uiText.errors.saveBeforeExport);
       return;
@@ -1031,6 +1035,7 @@ export function App() {
         audio_mode: settings.audio_mode,
         resolution: settings.resolution,
         bitrate_kbps: settings.bitrate_kbps,
+        encoder: settings.encoder,
       },
     }).then((response) => {
       if (!response.ok) setErrorMessage(prettyError(response.error));
@@ -1573,10 +1578,16 @@ export function App() {
   }, [activeExportJobId, detectJobs, exportCancelling, exportStatus, runtimeJobs]);
 
   // terminal 状態のジョブを自動で dismiss するタイマーをスケジュール
-  const DISMISS_DELAYS: Record<string, number> = { completed: 3000, cancelled: 4000, failed: 6000 };
+  // export 完了はフォルダを開くボタンが見えるよう長めに設定
+  function getDismissDelay(item: JobProgressView): number | undefined {
+    if (item.state === "completed") return item.job_kind === "export" ? 12000 : 3000;
+    if (item.state === "cancelled") return 4000;
+    if (item.state === "failed") return 6000;
+    return undefined;
+  }
   useEffect(() => {
     for (const item of jobPanelItems) {
-      const delay = DISMISS_DELAYS[item.state];
+      const delay = getDismissDelay(item);
       if (delay && !scheduledDismissRef.current.has(item.job_id)) {
         scheduledDismissRef.current.add(item.job_id);
         const timer = window.setTimeout(() => {
@@ -1613,6 +1624,13 @@ export function App() {
       const next = { ...current };
       delete next[jobId];
       return next;
+    });
+  }
+
+  function handleOpenFolder(job: JobProgressView) {
+    if (!job.output_path) return;
+    void invoke("reveal_path_in_explorer", { path: job.output_path }).catch(() => {
+      // フォルダを開けなかった場合は静かに無視する
     });
   }
 
@@ -1766,10 +1784,20 @@ export function App() {
               <div className="nle-preview-stage">
                 <video
                   ref={videoRef}
-                  className="nle-preview-stage__video"
+                  className={`nle-preview-stage__video${mosaicPreviewEnabled ? " nle-preview-stage__video--hidden" : ""}`}
                   src={previewSrc}
                   onTimeUpdate={handleVideoTimeUpdate}
                 />
+                {currentVideo && (
+                  <MosaicPreviewCanvas
+                    videoRef={videoRef}
+                    tracks={project?.tracks ?? []}
+                    currentFrame={currentFrame}
+                    videoMeta={currentVideo}
+                    enabled={mosaicPreviewEnabled}
+                    cellPx={exportSettings.mosaic_strength}
+                  />
+                )}
                 <CanvasStagePanel
                   video={currentVideo}
                   track={selectedTrack}
@@ -1787,6 +1815,13 @@ export function App() {
             <div className="nle-preview__info-bar">
               <span>{uiText.preview.sourcePath}</span>
               <span>{currentVideo?.source_path ?? uiText.project.none}</span>
+              <button
+                className={`nle-btn nle-btn--small nle-preview__mosaic-toggle${mosaicPreviewEnabled ? " nle-preview__mosaic-toggle--active" : ""}`}
+                onClick={() => setMosaicPreviewEnabled((v) => !v)}
+                title={mosaicPreviewEnabled ? "モザイクプレビューを無効化" : "モザイクプレビューを有効化"}
+              >
+                {mosaicPreviewEnabled ? "モザイク ON" : "モザイク OFF"}
+              </button>
             </div>
           </>
         )}
@@ -1910,7 +1945,7 @@ export function App() {
         />
       </section>
 
-      <JobPanel jobs={visibleJobPanelItems} onCancel={(job) => void handleCancelJob(job)} onDismiss={handleDismissJob} />
+      <JobPanel jobs={visibleJobPanelItems} onCancel={(job) => void handleCancelJob(job)} onDismiss={handleDismissJob} onOpenFolder={handleOpenFolder} />
 
       {recoveryModalOpen && recoveryCandidates.length ? (
         <div className="guard-modal-backdrop" role="presentation">

@@ -1,4 +1,4 @@
-import type { Keyframe, KeyframeShapeType, KeyframeSummary } from "./types";
+import type { Keyframe, KeyframeShapeType, KeyframeSummary, MaskSegment, MaskTrack } from "./types";
 
 // Mirrors backend _INTERPOLATE_MAX_GAP / _FRAME_GAP_REJECT
 const _INTERPOLATE_MAX_GAP = 30;
@@ -13,6 +13,16 @@ const _POLYGON_MIN_VERTICES = 3;
  * "held_from_prior" — no exact match; shape is held from the preceding keyframe.
  */
 export type ResolveReason = "explicit" | "interpolated" | "held_from_prior";
+
+const _RENDERABLE_SEGMENT_STATES = new Set<MaskSegment["state"]>([
+  "confirmed",
+  "held",
+  "predicted",
+  "interpolated",
+  "uncertain",
+  "active",
+  "detected",
+]);
 
 /**
  * Return the most recent keyframe at or before frame_index.
@@ -395,4 +405,91 @@ export function resolveForEditing(
   }
 
   return { keyframe: prior, reason: "held_from_prior" };
+}
+
+function isRenderableSegment(segment: MaskSegment): boolean {
+  return _RENDERABLE_SEGMENT_STATES.has(segment.state);
+}
+
+function renderSegments(track: MaskTrack): MaskSegment[] {
+  const explicitSegments = track.segments.filter(isRenderableSegment);
+  if (explicitSegments.length > 0) {
+    if (
+      track.keyframes.length > 0 &&
+      explicitSegments.some((segment) => segment.state === "held" || segment.state === "uncertain")
+    ) {
+      const firstFrame = track.keyframes[0]!.frame_index;
+      const lastFrame = track.keyframes[track.keyframes.length - 1]!.frame_index;
+      const keyframeSpanIsCovered = explicitSegments.some(
+        (segment) => segment.start_frame <= firstFrame && segment.end_frame >= lastFrame,
+      );
+      if (!keyframeSpanIsCovered) {
+        const state: MaskSegment["state"] = track.keyframes.some((kf) => kf.source === "manual")
+          ? "confirmed"
+          : "detected";
+        return [...explicitSegments, { start_frame: firstFrame, end_frame: lastFrame, state }].sort(
+          (a, b) => (a.start_frame - b.start_frame) || (a.end_frame - b.end_frame),
+        );
+      }
+    }
+    return explicitSegments;
+  }
+
+  if (track.keyframes.length === 0) return [];
+
+  const firstFrame = track.keyframes[0]!.frame_index;
+  const lastFrame = track.keyframes[track.keyframes.length - 1]!.frame_index;
+  const state: MaskSegment["state"] = track.keyframes.some((kf) => kf.source === "manual")
+    ? "confirmed"
+    : "detected";
+  return [{ start_frame: firstFrame, end_frame: lastFrame, state }];
+}
+
+function frameIsRenderable(track: MaskTrack, frameIndex: number): boolean {
+  return renderSegments(track).some(
+    (segment) => segment.start_frame <= frameIndex && frameIndex <= segment.end_frame,
+  );
+}
+
+export function resolveForRender(
+  track: MaskTrack,
+  frameIndex: number,
+): { keyframe: Keyframe; reason: ResolveReason } | null {
+  if (!frameIsRenderable(track, frameIndex)) return null;
+
+  const sorted = [...track.keyframes].sort((a, b) => a.frame_index - b.frame_index);
+  let priorKf: Keyframe | null = null;
+  let nextKf: Keyframe | null = null;
+
+  for (const kf of sorted) {
+    if (kf.frame_index < frameIndex) {
+      priorKf = kf;
+    } else if (kf.frame_index === frameIndex) {
+      return { keyframe: kf, reason: "explicit" };
+    } else {
+      nextKf = kf;
+      break;
+    }
+  }
+
+  if (priorKf === null) return null;
+
+  if (
+    nextKf !== null &&
+    priorKf.shape_type === nextKf.shape_type &&
+    nextKf.frame_index - priorKf.frame_index <= _INTERPOLATE_MAX_GAP
+  ) {
+    if (priorKf.shape_type === "ellipse") {
+      return { keyframe: interpolateEllipse(priorKf, nextKf, frameIndex), reason: "interpolated" };
+    }
+    if (
+      priorKf.shape_type === "polygon" &&
+      priorKf.points.length >= _POLYGON_MIN_VERTICES &&
+      nextKf.points.length >= _POLYGON_MIN_VERTICES
+    ) {
+      return { keyframe: interpolatePolygon(priorKf, nextKf, frameIndex), reason: "interpolated" };
+    }
+  }
+
+  return { keyframe: priorKf, reason: "held_from_prior" };
 }

@@ -321,10 +321,42 @@ fn resolve_bundled_tool(dir: &PathBuf, tool_name: &str) -> Option<PathBuf> {
     candidates.into_iter().find(|candidate| candidate.exists())
 }
 
+#[tauri::command]
+fn reveal_path_in_explorer(path: String) -> Result<(), String> {
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::process::CommandExt;
+        std::process::Command::new("explorer.exe")
+            .arg(format!("/select,{path}"))
+            .creation_flags(0x08000000)
+            .spawn()
+            .map_err(|error| format!("Failed to open Explorer: {error}"))?;
+    }
+    #[cfg(target_os = "macos")]
+    {
+        std::process::Command::new("open")
+            .args(["-R", &path])
+            .spawn()
+            .map_err(|error| format!("Failed to open Finder: {error}"))?;
+    }
+    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+    {
+        let parent = std::path::Path::new(&path)
+            .parent()
+            .map(|p| p.to_string_lossy().to_string())
+            .unwrap_or_else(|| path.clone());
+        std::process::Command::new("xdg-open")
+            .arg(&parent)
+            .spawn()
+            .map_err(|error| format!("Failed to open file manager: {error}"))?;
+    }
+    Ok(())
+}
+
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
-        .invoke_handler(tauri::generate_handler![run_backend_command])
+        .invoke_handler(tauri::generate_handler![run_backend_command, reveal_path_in_explorer])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

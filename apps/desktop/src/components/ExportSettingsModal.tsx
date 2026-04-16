@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 type ExportSettingsModalProps = {
   open: boolean;
@@ -12,6 +12,7 @@ export type ExportSettings = {
   mosaic_strength: number;
   audio_mode: string;
   bitrate_kbps: number | null;
+  encoder: "auto" | "gpu" | "cpu";
 };
 
 export function ExportSettingsModal({ open, onClose, onExport, defaultSettings }: ExportSettingsModalProps) {
@@ -20,6 +21,17 @@ export function ExportSettingsModal({ open, onClose, onExport, defaultSettings }
   const [audioMode, setAudioMode] = useState(defaultSettings.audio_mode);
   const [bitrateMode, setBitrateMode] = useState<"auto" | "manual">(defaultSettings.bitrate_kbps ? "manual" : "auto");
   const [bitrateKbps, setBitrateKbps] = useState(defaultSettings.bitrate_kbps ?? 16000);
+  const [encoder, setEncoder] = useState<"auto" | "gpu" | "cpu">(defaultSettings.encoder ?? "auto");
+
+  useEffect(() => {
+    if (!open) return;
+    setResolution(defaultSettings.resolution);
+    setMosaicStrength(defaultSettings.mosaic_strength);
+    setAudioMode(defaultSettings.audio_mode);
+    setBitrateMode(defaultSettings.bitrate_kbps ? "manual" : "auto");
+    setBitrateKbps(defaultSettings.bitrate_kbps ?? 16000);
+    setEncoder(defaultSettings.encoder ?? "auto");
+  }, [defaultSettings, open]);
 
   if (!open) return null;
 
@@ -29,6 +41,7 @@ export function ExportSettingsModal({ open, onClose, onExport, defaultSettings }
       mosaic_strength: mosaicStrength,
       audio_mode: audioMode,
       bitrate_kbps: bitrateMode === "manual" ? bitrateKbps : null,
+      encoder,
     });
   }
 
@@ -81,6 +94,15 @@ export function ExportSettingsModal({ open, onClose, onExport, defaultSettings }
             />
           )}
           {bitrateMode === "manual" && <span>kbps</span>}
+        </div>
+
+        <div className="nle-form-row">
+          <label className="nle-form-label">エンコーダー</label>
+          <select className="nle-select" value={encoder} onChange={(e) => setEncoder(e.target.value as "auto" | "gpu" | "cpu")}>
+            <option value="auto">自動 (GPU優先→CPU)</option>
+            <option value="gpu">GPU (NVENC/QSV/AMF)</option>
+            <option value="cpu">CPU (libx264)</option>
+          </select>
         </div>
 
         <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 16 }}>

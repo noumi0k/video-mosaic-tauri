@@ -49,7 +49,7 @@ export type Keyframe = {
 export type MaskSegment = {
   start_frame: number;
   end_frame: number;
-  state: "confirmed" | "held" | "predicted" | "interpolated" | "uncertain";
+  state: "confirmed" | "held" | "predicted" | "interpolated" | "uncertain" | "active" | "detected";
 };
 
 export type MaskTrack = {
@@ -271,6 +271,7 @@ export type JobProgressView = {
   is_indeterminate: boolean;
   can_cancel: boolean;
   subtitle: string;
+  output_path?: string | null;
 };
 
 export type SelectKeyframePayload = {

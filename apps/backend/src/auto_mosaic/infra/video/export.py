@@ -19,6 +19,119 @@ class ExportCancelledError(Exception):
     pass
 
 
+class FfmpegEncodeError(RuntimeError):
+    def __init__(self, encoder_used: str, message: str) -> None:
+        super().__init__(message)
+        self.encoder_used = encoder_used
+
+
+# ---------------------------------------------------------------------------
+# GPU encoder probe
+# ---------------------------------------------------------------------------
+
+_GPU_ENCODER_CANDIDATES = ["h264_nvenc", "h264_qsv", "h264_amf"]
+
+# Module-level cache: { ffmpeg_path -> [available_encoder, ...] }
+_encoder_cache: dict[str, list[str]] = {}
+
+
+def _open_capture(source_path: Path) -> cv2.VideoCapture:
+    capture = cv2.VideoCapture(str(source_path))
+    if not capture.isOpened():
+        raise RuntimeError(f"Failed to open the source video for export: {source_path}")
+    return capture
+
+
+def _probe_available_gpu_encoders(ffmpeg_path: str) -> list[str]:
+    """Return GPU h264 encoder names that ffmpeg reports as available."""
+    if ffmpeg_path in _encoder_cache:
+        return _encoder_cache[ffmpeg_path]
+
+    available: list[str] = []
+    try:
+        result = subprocess.run(
+            [ffmpeg_path, "-hide_banner", "-encoders"],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=10,
+        )
+        output = result.stdout + result.stderr
+        for enc in _GPU_ENCODER_CANDIDATES:
+            if enc in output:
+                available.append(enc)
+    except Exception:
+        pass
+
+    _encoder_cache[ffmpeg_path] = available
+    return available
+
+
+def _build_encoder_cmd_fragment(
+    encoder_pref: str,
+    ffmpeg_path: str,
+    bitrate_kbps: int,
+) -> tuple[list[str], str, str | None]:
+    """Return (ffmpeg_args, encoder_name_used, warning_or_None).
+
+    encoder_pref: "auto" | "gpu" | "cpu"
+    """
+    br = bitrate_kbps
+    maxrate = int(br * 1.5)
+    bufsize = br * 2
+
+    if encoder_pref == "cpu":
+        args = [
+            "-c:v", "libx264", "-preset", "medium",
+            "-b:v", f"{br}k", "-maxrate", f"{maxrate}k",
+            "-bufsize", f"{bufsize}k",
+            "-pix_fmt", "yuv420p",
+        ]
+        return args, "libx264", None
+
+    # "gpu" or "auto" — probe and try GPU encoders
+    gpu_encoders = _probe_available_gpu_encoders(ffmpeg_path)
+
+    if gpu_encoders:
+        enc = gpu_encoders[0]
+        if enc == "h264_nvenc":
+            args = [
+                "-c:v", "h264_nvenc", "-preset", "p4",
+                "-b:v", f"{br}k", "-maxrate", f"{maxrate}k",
+                "-bufsize", f"{bufsize}k",
+                "-pix_fmt", "yuv420p",
+            ]
+        elif enc == "h264_qsv":
+            args = [
+                "-c:v", "h264_qsv", "-preset", "medium",
+                "-b:v", f"{br}k",
+                "-pix_fmt", "nv12",
+            ]
+        else:  # h264_amf
+            args = [
+                "-c:v", "h264_amf", "-quality", "balanced",
+                "-b:v", f"{br}k",
+                "-pix_fmt", "yuv420p",
+            ]
+        return args, enc, None
+
+    # No GPU encoder found
+    if encoder_pref == "gpu":
+        # Caller asked explicitly for GPU; we will try but warn
+        warning = "No GPU encoder found (h264_nvenc/qsv/amf). Falling back to CPU (libx264)."
+    else:
+        warning = None  # "auto" silently falls back
+
+    args = [
+        "-c:v", "libx264", "-preset", "medium",
+        "-b:v", f"{br}k", "-maxrate", f"{maxrate}k",
+        "-bufsize", f"{bufsize}k",
+        "-pix_fmt", "yuv420p",
+    ]
+    return args, "libx264", warning
+
+
 # ---------------------------------------------------------------------------
 # Resolution / bitrate presets (aligned with PySide6 ExportPreset)
 # ---------------------------------------------------------------------------
@@ -124,36 +237,87 @@ def _build_shape_mask(frame_shape: tuple[int, ...], keyframe: Keyframe) -> np.nd
         center = (x + (w // 2), y + (h // 2))
         axes = (max(w // 2, 1), max(h // 2, 1))
         cv2.ellipse(mask, center, axes, 0.0, 0.0, 360.0, 255, thickness=-1)
-        return mask
+    else:
+        points = np.array([_normalized_point(point, width, height) for point in keyframe.points], dtype=np.int32)
+        if len(points) >= 3:
+            cv2.fillPoly(mask, [points], 255)
 
-    points = np.array([_normalized_point(point, width, height) for point in keyframe.points], dtype=np.int32)
-    if len(points) >= 3:
-        cv2.fillPoly(mask, [points], 255)
+    # expand_px: マスク境界をピクセル単位で外側に拡張する
+    # ユーザーが設定したモザイク領域がマスクを超える場合に使用
+    if keyframe.expand_px is not None and keyframe.expand_px > 0:
+        px = int(keyframe.expand_px)
+        kernel_size = px * 2 + 1
+        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (kernel_size, kernel_size))
+        mask = cv2.dilate(mask, kernel)
+
     return mask
 
 
 def _apply_mosaic_mask(frame: np.ndarray, keyframe: Keyframe, mosaic_cell_px: int = 12) -> np.ndarray:
+    """Apply pixelated mosaic to the region defined by keyframe's mask.
+
+    Respects expand_px (mask dilation, handled in _build_shape_mask) and
+    feather (soft edge blending via Gaussian blur of the binary mask).
+
+    feather=0 or None  → hard binary mask (original behaviour)
+    feather>0          → GaussianBlur softens the mask edge; pixels near the
+                         boundary are partially blended (alpha compositing).
+    """
     mask = _build_shape_mask(frame.shape, keyframe)
     if not np.any(mask):
         return frame
 
-    output = frame.copy()
-    ys, xs = np.where(mask > 0)
-    x0 = int(xs.min())
-    x1 = int(xs.max()) + 1
-    y0 = int(ys.min())
-    y1 = int(ys.max()) + 1
-    roi = output[y0:y1, x0:x1]
-    roi_mask = mask[y0:y1, x0:x1]
-    roi_height, roi_width = roi.shape[:2]
-
+    height, width = frame.shape[:2]
     block = max(int(mosaic_cell_px), 2)
-    downsampled_width = max(1, roi_width // block)
-    downsampled_height = max(1, roi_height // block)
-    reduced = cv2.resize(roi, (downsampled_width, downsampled_height), interpolation=cv2.INTER_LINEAR)
-    mosaic = cv2.resize(reduced, (roi_width, roi_height), interpolation=cv2.INTER_NEAREST)
-    roi[roi_mask > 0] = mosaic[roi_mask > 0]
-    output[y0:y1, x0:x1] = roi
+    feather_px = int(keyframe.feather) if (keyframe.feather is not None and keyframe.feather > 0) else 0
+
+    # Binary-mask bounding box
+    ys, xs = np.where(mask > 0)
+    bx0 = int(xs.min())
+    bx1 = int(xs.max()) + 1
+    by0 = int(ys.min())
+    by1 = int(ys.max()) + 1
+
+    if feather_px > 0:
+        # Extend ROI outward so the blurred fringe beyond the binary edge is captured
+        x0 = max(0, bx0 - feather_px)
+        x1 = min(width, bx1 + feather_px)
+        y0 = max(0, by0 - feather_px)
+        y1 = min(height, by1 + feather_px)
+
+        ksize = feather_px * 2 + 1
+        soft_mask = cv2.GaussianBlur(
+            mask.astype(np.float32), (ksize, ksize), sigmaX=feather_px / 2.0,
+        )
+        alpha = soft_mask[y0:y1, x0:x1] / 255.0          # (h, w) in [0.0, 1.0]
+        alpha_3c = alpha[:, :, np.newaxis]                  # broadcast over BGR channels
+
+        roi_orig = frame[y0:y1, x0:x1].astype(np.float32)
+        roi_h, roi_w = roi_orig.shape[:2]
+        reduced = cv2.resize(
+            roi_orig, (max(1, roi_w // block), max(1, roi_h // block)),
+            interpolation=cv2.INTER_LINEAR,
+        )
+        mosaic = cv2.resize(reduced, (roi_w, roi_h), interpolation=cv2.INTER_NEAREST)
+
+        blended = (roi_orig * (1.0 - alpha_3c) + mosaic * alpha_3c).astype(np.uint8)
+        output = frame.copy()
+        output[y0:y1, x0:x1] = blended
+    else:
+        # Hard binary mask — same as original behaviour
+        x0, x1, y0, y1 = bx0, bx1, by0, by1
+        output = frame.copy()
+        roi = output[y0:y1, x0:x1]
+        roi_mask = mask[y0:y1, x0:x1]
+        roi_h, roi_w = roi.shape[:2]
+        reduced = cv2.resize(
+            roi, (max(1, roi_w // block), max(1, roi_h // block)),
+            interpolation=cv2.INTER_LINEAR,
+        )
+        mosaic = cv2.resize(reduced, (roi_w, roi_h), interpolation=cv2.INTER_NEAREST)
+        roi[roi_mask > 0] = mosaic[roi_mask > 0]
+        output[y0:y1, x0:x1] = roi
+
     return output
 
 
@@ -174,15 +338,22 @@ def _ffmpeg_pipe_export(
     bitrate_kbps: int,
     job_id: str | None,
     ffmpeg_path: str,
-) -> tuple[int, str, list[str]]:
+    encoder_pref: str = "auto",
+) -> tuple[int, str, str, list[str]]:
     """Render frames through an ffmpeg rawvideo pipe.
 
-    Returns (written_frames, audio_status, warnings).
+    Returns (written_frames, audio_status, encoder_used, warnings).
     Raises ExportCancelledError on cancel.
     """
     needs_resize = (out_w != width or out_h != height)
     warnings: list[str] = []
     audio_status = "video-only"
+
+    encoder_args, encoder_used, encoder_warning = _build_encoder_cmd_fragment(
+        encoder_pref, ffmpeg_path, bitrate_kbps
+    )
+    if encoder_warning:
+        warnings.append(encoder_warning)
 
     cmd: list[str] = [
         ffmpeg_path, "-y",
@@ -193,13 +364,7 @@ def _ffmpeg_pipe_export(
     ]
     if audio_mode == "mux_if_possible":
         cmd += ["-i", str(source_path), "-map", "0:v:0", "-map", "1:a:0?"]
-    # h264 encoding with target bitrate
-    cmd += [
-        "-c:v", "libx264", "-preset", "medium",
-        "-b:v", f"{bitrate_kbps}k", "-maxrate", f"{int(bitrate_kbps * 1.5)}k",
-        "-bufsize", f"{bitrate_kbps * 2}k",
-        "-pix_fmt", "yuv420p",
-    ]
+    cmd += encoder_args
     if audio_mode == "mux_if_possible":
         cmd += ["-c:a", "aac", "-shortest"]
     cmd.append(str(output))
@@ -248,7 +413,7 @@ def _ffmpeg_pipe_export(
                     job_id,
                     phase="rendering_frames",
                     progress=min(0.9, 0.08 + (render_ratio * 0.8)),
-                    message="Rendering mosaic frames (ffmpeg h264)",
+                    message=f"Rendering mosaic frames (ffmpeg {encoder_used})",
                     frames_written=written_frames,
                     total_frames=total_frames,
                     audio_mode=audio_mode,
@@ -263,12 +428,15 @@ def _ffmpeg_pipe_export(
     _, stderr_bytes = process.communicate(timeout=60)
     if process.returncode != 0:
         stderr_text = stderr_bytes.decode("utf-8", errors="replace").strip()
-        raise RuntimeError(f"ffmpeg encoding failed (exit {process.returncode}): {stderr_text[-300:]}")
+        raise FfmpegEncodeError(
+            encoder_used,
+            f"ffmpeg encoding failed (exit {process.returncode}): {stderr_text[-300:]}",
+        )
 
     if audio_mode == "mux_if_possible":
         audio_status = "muxed"
 
-    return written_frames, audio_status, warnings
+    return written_frames, audio_status, encoder_used, warnings
 
 
 def _mux_original_audio(
@@ -399,6 +567,7 @@ def export_project_video(
     job_id: str | None = None,
     resolution: str = "source",
     bitrate_kbps: int | None = None,
+    encoder: str = "auto",
 ) -> dict:
     if project.video is None:
         return {
@@ -427,8 +596,9 @@ def export_project_video(
     output.parent.mkdir(parents=True, exist_ok=True)
     warnings: list[str] = []
 
-    capture = cv2.VideoCapture(str(source_path))
-    if not capture.isOpened():
+    try:
+        capture = _open_capture(source_path)
+    except RuntimeError:
         return {
             "ok": False,
             "error": {
@@ -448,6 +618,7 @@ def export_project_video(
         bitrate_kbps = _auto_bitrate_kbps(out_w, out_h)
     written_frames = 0
     audio_status = "video-only"
+    encoder_used = "opencv"
     _set_job_status(
         job_id,
         phase="preparing",
@@ -465,24 +636,64 @@ def export_project_video(
         if use_ffmpeg:
             # ── FFmpeg pipe export: h264 encoding + audio mux in one pass ──
             try:
-                written_frames, audio_status, ffmpeg_warnings = _ffmpeg_pipe_export(
-                    capture=capture,
-                    project=project,
-                    output=output,
-                    source_path=source_path,
-                    width=width,
-                    height=height,
-                    out_w=out_w,
-                    out_h=out_h,
-                    fps=fps,
-                    total_frames=total_frames,
-                    mosaic_strength=mosaic_strength,
-                    audio_mode=audio_mode,
-                    bitrate_kbps=bitrate_kbps,
-                    job_id=job_id,
-                    ffmpeg_path=ffmpeg_info["path"],
-                )
-                warnings.extend(ffmpeg_warnings)
+                try:
+                    written_frames, audio_status, encoder_used, ffmpeg_warnings = _ffmpeg_pipe_export(
+                        capture=capture,
+                        project=project,
+                        output=output,
+                        source_path=source_path,
+                        width=width,
+                        height=height,
+                        out_w=out_w,
+                        out_h=out_h,
+                        fps=fps,
+                        total_frames=total_frames,
+                        mosaic_strength=mosaic_strength,
+                        audio_mode=audio_mode,
+                        bitrate_kbps=bitrate_kbps,
+                        job_id=job_id,
+                        ffmpeg_path=ffmpeg_info["path"],
+                        encoder_pref=encoder,
+                    )
+                    warnings.extend(ffmpeg_warnings)
+                except FfmpegEncodeError as exc:
+                    if encoder != "auto" or exc.encoder_used not in _GPU_ENCODER_CANDIDATES:
+                        raise
+                    warnings.append(
+                        f"{exc.encoder_used} failed at runtime in auto mode. Retrying export with CPU encoder (libx264)."
+                    )
+                    output.unlink(missing_ok=True)
+                    capture.release()
+                    capture = _open_capture(source_path)
+                    _set_job_status(
+                        job_id,
+                        phase="preparing",
+                        progress=0.03,
+                        message="Retrying export with CPU encoder",
+                        total_frames=total_frames,
+                        audio_mode=audio_mode,
+                        output_path=str(output),
+                        warnings=warnings,
+                    )
+                    written_frames, audio_status, encoder_used, ffmpeg_warnings = _ffmpeg_pipe_export(
+                        capture=capture,
+                        project=project,
+                        output=output,
+                        source_path=source_path,
+                        width=width,
+                        height=height,
+                        out_w=out_w,
+                        out_h=out_h,
+                        fps=fps,
+                        total_frames=total_frames,
+                        mosaic_strength=mosaic_strength,
+                        audio_mode=audio_mode,
+                        bitrate_kbps=bitrate_kbps,
+                        job_id=job_id,
+                        ffmpeg_path=ffmpeg_info["path"],
+                        encoder_pref="cpu",
+                    )
+                    warnings.extend(ffmpeg_warnings)
             finally:
                 capture.release()
         else:
@@ -628,7 +839,7 @@ def export_project_video(
             "source_height": height,
             "resolution": resolution,
             "bitrate_kbps": bitrate_kbps,
-            "encoder": "ffmpeg-h264" if use_ffmpeg else "opencv",
+            "encoder": encoder_used,
             "effect": "mosaic",
             "audio": audio_status,
             "audio_mode": audio_mode,

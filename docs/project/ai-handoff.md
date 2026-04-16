@@ -3,6 +3,10 @@
 > 位置づけ: このファイルは直近作業の handoff log です。現行実装の正本は `docs/engineering/current-implementation.md`、実装済み / 未実装 backlog の正本は `docs/project/unimplemented-features.md` です。末尾の Next Logical Step は作成時点の履歴として扱い、現在の作業判断では正本を優先してください。
 
 ## Snapshot
+- Minimum flow (open video → detect → mask edit → export) was manually verified in the Tauri window on April 16, 2026.
+- Export now keeps preview/render semantics aligned for render span and segment gaps.
+- Export auto encoder now retries with CPU (`libx264`) when a probed GPU encoder fails at runtime.
+- Export modal state now rehydrates from parent settings on reopen.
 - Frontend recovered shell is now back to a usable editor shape.
 - `App.tsx` is a clean UTF-8 shell again and no longer carries the old mojibake damage.
 - The shared Job Panel remains the common progress surface for runtime jobs, detect jobs, and export.
@@ -12,6 +16,40 @@
 - Current desktop test status on April 8, 2026: `npm.cmd test` in `apps/desktop` passed with `21/21`.
 - Current backend smoke status on April 8, 2026: `python -m pytest tests\\test_cli_smoke.py` in `apps/backend` passed with `62 passed`.
 - Current backend integrity test status on April 9, 2026: `python -m pytest tests/test_model_integrity.py` passed with `25/25`.
+- Current targeted backend status on April 16, 2026:
+  - `python -m pytest tests/test_cli_smoke.py -k "auto_encoder_retries_with_cpu_after_gpu_runtime_failure"` passed
+  - `python -m pytest tests/test_domain_track.py -k "held_segments_do_not_hide_detector_keyframe_span"` passed
+  - `python -m pytest tests/test_mask_continuity.py -k "held_segment_does_not_hide_accepted_detector_keyframes"` passed
+- Current desktop build status on April 16, 2026: `npm.cmd run build` in `apps/desktop` passed.
+
+## What Was Fixed In This Pass (April 16, 2026 — minimum flow verification follow-up)
+
+### Review findings addressed
+- Export `encoder="auto"` could still fail hard when FFmpeg exposed a GPU encoder but runtime initialization failed. This now retries with CPU (`libx264`) instead of aborting the export.
+- Mosaic preview used editing semantics rather than render semantics, so it could show masks after the last renderable frame or inside segment gaps. The preview now mirrors export-side render gating.
+- Export settings modal state persisted across reopen, which could show stale encoder / bitrate settings after parent-state changes. The modal now reloads from current app state when reopened.
+
+### Files changed in this pass
+- `apps/backend/src/auto_mosaic/infra/video/export.py`
+- `apps/backend/tests/test_cli_smoke.py`
+- `apps/desktop/src/maskShapeResolver.ts`
+- `apps/desktop/src/components/MosaicPreviewCanvas.tsx`
+- `apps/desktop/src/components/ExportSettingsModal.tsx`
+- `apps/desktop/tests/maskShapeResolver.test.ts`
+- `docs/engineering/current-implementation.md`
+- `docs/project/unimplemented-features.md`
+- `docs/project/ai-handoff.md`
+
+### Verification in this pass
+- Manual Tauri flow: open video → detect → mask edit → export: confirmed by human
+- `npm.cmd run build` in `apps/desktop`: passed
+- `python -m pytest tests/test_cli_smoke.py -k "auto_encoder_retries_with_cpu_after_gpu_runtime_failure"`: passed
+- `python -m pytest tests/test_domain_track.py -k "held_segments_do_not_hide_detector_keyframe_span"`: passed
+- `python -m pytest tests/test_mask_continuity.py -k "held_segment_does_not_hide_accepted_detector_keyframes"`: passed
+
+### Not fully verified in this pass
+- Desktop Node test runner is still blocked in this sandbox with `spawn EPERM`, so the frontend test suite was not re-run end-to-end here.
+- Preview fidelity for `expand_px` / `feather` is still not guaranteed to match backend export pixel-for-pixel. The verified manual flow did not expose a blocking issue, but the preview remains an approximation.
 
 ## What Was Fixed In This Pass (April 9, 2026 — Python ABI mismatch in review-runtime)
 
@@ -245,9 +283,9 @@ destination was silently corrupted:
 - 320n.onnx size (12150158) and SHA-256 verified from prior download
 
 ## Not Fully Verified
-- Manual interactive UI flow in the Tauri window (open video → detect → edit on canvas → save/load → export) has not been driven end-to-end by a human in the Tauri window.
 - GPU/CUDA path in the review-runtime was not exercised.
 - Actual end-to-end model download (320n.onnx via new API URL, through Tauri → Python worker) has not been driven in a Tauri window session.
+- Frontend Node test runner remains sandbox-sensitive (`spawn EPERM`) in this environment, so `npm.cmd test` was not re-run in this pass.
 
 ## Known Risks
 - GitHub API asset IDs (176831997, 176832019) are stable for existing releases but
@@ -255,6 +293,7 @@ destination was silently corrupted:
   that happens, update `model_catalog.py` with new asset IDs and the new expected_size/expected_sha256.
 - `check:mojibake` is still a heuristic guard, not a full encoding validator.
 - The review-runtime prepare step must be re-run whenever backend Python files change.
+- `MosaicPreviewCanvas` now matches render span semantics, but it is still a frontend approximation and does not guarantee byte-for-byte parity with backend export for blurred / dilated masks.
 - SAM2, erax, and 640m.onnx have no expected_size/expected_sha256 in the catalog (values
   were not available to hash locally). Doctor will still catch HTML/size/ONNX-magic corruption
   for those files, but will not catch a byte-flipped binary of the correct size.
@@ -277,8 +316,7 @@ destination was silently corrupted:
 - Do not hand-edit `review-runtime/python/` to swap interpreters without re-running the ABI check.
 
 ## Next Logical Step
-1. Drive the full interactive UI flow in the Tauri window (open video → detect → edit on canvas → save/load → export) to confirm the wiring end-to-end.
-2. Continue moving editor-specific orchestration out of `App.tsx` into small hooks or controller modules before adding more editing features.
-3. Implement remaining P2 items from `docs/project/unimplemented-features.md`: onion skin, GPU encoder selection, export queue, and E2E tests.
+1. Continue moving editor-specific orchestration out of `App.tsx` into small hooks or controller modules before adding more editing features.
+2. Implement remaining P2 items from `docs/project/unimplemented-features.md`: onion skin, AI detect performance work, export queue, and E2E tests.
+3. If backend Python changes are intended for review builds, re-run `npm.cmd run review:runtime`.
 4. (Backlog) Add `expected_size` + `expected_sha256` for `640m.onnx`, SAM2, erax once those files are available to hash locally.
-5. Re-run `npm.cmd run review:runtime` whenever backend Python changes need to be included in a review build.

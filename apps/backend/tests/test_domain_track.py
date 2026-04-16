@@ -78,6 +78,23 @@ class TestRenderSegments:
         assert segs[0].end_frame == 100
         assert segs[0].state == "interpolated"
 
+    def test_held_segments_do_not_hide_detector_keyframe_span(self):
+        track = MaskTrack(
+            track_id="t1",
+            label="detector",
+            state="detected",
+            source="detector",
+            keyframes=[_kf(0, "detector"), _kf(6, "detector")],
+            segments=[MaskSegment(start_frame=2, end_frame=4, state="held")],
+        )
+
+        segs = track.render_segments()
+
+        assert any(seg.start_frame == 0 and seg.end_frame == 6 and seg.state == "detected" for seg in segs)
+        assert track.frame_is_renderable(0)
+        assert track.frame_is_renderable(3)
+        assert track.frame_is_renderable(6)
+
 
 # ---------------------------------------------------------------------------
 # frame_is_renderable

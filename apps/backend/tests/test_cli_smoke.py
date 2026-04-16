@@ -46,6 +46,7 @@ from auto_mosaic.domain.project import CURRENT_PROJECT_SCHEMA_VERSION, ProjectDo
 from auto_mosaic.domain.project import Keyframe, MaskTrack
 from auto_mosaic.infra.ai import detect_video as detect_video_infra
 from auto_mosaic.infra.ai.detect_ledger import get_detect_job_ledger
+from auto_mosaic.infra.video import export as export_infra
 from auto_mosaic.infra.video.export import export_project_video
 from auto_mosaic.infra.video import export_jobs
 from auto_mosaic.runtime.external_tools import resolve_external_tool
@@ -1994,6 +1995,73 @@ def test_export_video_falls_back_to_video_only_when_ffmpeg_is_unavailable(monkey
     assert response["data"]["audio"] == "video-only"
     assert any("without audio" in warning for warning in response["warnings"])
     assert "audio" not in _probe_stream_types(output_path)
+
+
+def test_export_video_auto_encoder_retries_with_cpu_after_gpu_runtime_failure(monkeypatch):
+    local_test_root = Path.cwd() / ".pytest-tmp-export-auto-retry"
+    local_test_root.mkdir(parents=True, exist_ok=True)
+    source_path = local_test_root / "export-auto-encoder-retry-source.avi"
+    output_path = local_test_root / "export-auto-encoder-retry-output.avi"
+    source_path.write_bytes(b"placeholder")
+    created = create_project.run(
+        {
+            "name": "ExportAutoEncoderRetryProject",
+            "video": {
+                "source_path": str(source_path),
+                "width": 160,
+                "height": 90,
+                "fps": 24.0,
+                "frame_count": 8,
+                "duration_sec": 8 / 24.0,
+                "readable": True,
+                "warnings": [],
+                "errors": [],
+                "first_frame_shape": [90, 160, 3],
+            },
+            "tracks": [],
+        }
+    )
+
+    attempts: list[str] = []
+    capture_open_count = 0
+
+    class DummyCapture:
+        def get(self, _prop):
+            return 0
+
+        def release(self):
+            return None
+
+    def fake_open_capture(_path):
+        nonlocal capture_open_count
+        capture_open_count += 1
+        return DummyCapture()
+
+    def fake_pipe_export(**kwargs):
+        attempts.append(kwargs["encoder_pref"])
+        if len(attempts) == 1:
+            raise export_infra.FfmpegEncodeError("h264_nvenc", "gpu runtime failure")
+        return 8, "video-only", "libx264", []
+
+    monkeypatch.setattr(
+        "auto_mosaic.infra.video.export.resolve_external_tool",
+        lambda tool_name: {"found": tool_name == "ffmpeg", "path": "ffmpeg", "source": "test"},
+    )
+    monkeypatch.setattr("auto_mosaic.infra.video.export._open_capture", fake_open_capture)
+    monkeypatch.setattr("auto_mosaic.infra.video.export._ffmpeg_pipe_export", fake_pipe_export)
+
+    response = export_project_video(
+        ProjectDocument.from_payload(created["data"]["project"]),
+        str(output_path),
+        audio_mode="video_only",
+        encoder="auto",
+    )
+
+    assert response["ok"] is True
+    assert attempts == ["auto", "cpu"]
+    assert capture_open_count == 2
+    assert response["data"]["encoder"] == "libx264"
+    assert any("Retrying export with CPU encoder" in warning for warning in response["warnings"])
 
 
 def test_export_video_mux_if_possible_preserves_audio_stream():
