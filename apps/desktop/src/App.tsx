@@ -5,6 +5,7 @@ import { message as tauriMessage, open, save } from "@tauri-apps/plugin-dialog";
 import { CanvasStagePanel } from "./components/CanvasStagePanel";
 import { DetectorSettingsModal } from "./components/DetectorSettingsModal";
 import { ExportSettingsModal, type ExportPreset, type ExportSettings } from "./components/ExportSettingsModal";
+import { ModelManagerModal } from "./components/ModelManagerModal";
 import { ShortcutHelpModal } from "./components/ShortcutHelpModal";
 import { usePersistedDetails } from "./hooks/usePersistedDetails";
 import { JobPanel } from "./components/JobPanel";
@@ -73,6 +74,18 @@ import type {
   VideoMetadata,
 } from "./types";
 
+type InstalledModelEntry = {
+  name: string;
+  path: string;
+  size_bytes: number;
+  status: "missing" | "broken" | "installed";
+  known: boolean;
+  required: boolean;
+  description: string | null;
+  source_label: string | null;
+  model_id: string | null;
+};
+
 type DoctorModelEntry = {
   name: string;
   exists: boolean;
@@ -122,6 +135,9 @@ type RecoverySnapshot = {
   project: ProjectDocument;
   readModel: ProjectReadModel | null;
   timestamp: string;
+  currentFrame?: number;
+  selectedTrackId?: string | null;
+  selectedKeyframeFrame?: number | null;
   /** Review session-level confirmed danger frame keys (`${trackId}-${frameIndex}`). */
   confirmedDangerFrames?: string[];
 };
@@ -166,6 +182,9 @@ function loadLegacyLocalStorageSnapshots(): RecoverySnapshot[] {
         project: parsed.project,
         readModel: parsed.readModel ?? null,
         timestamp: parsed.timestamp ?? new Date().toISOString(),
+        currentFrame: typeof parsed.currentFrame === "number" ? parsed.currentFrame : 0,
+        selectedTrackId: typeof parsed.selectedTrackId === "string" ? parsed.selectedTrackId : null,
+        selectedKeyframeFrame: typeof parsed.selectedKeyframeFrame === "number" ? parsed.selectedKeyframeFrame : null,
       });
       seen.add(id);
     } catch {
@@ -185,6 +204,9 @@ function loadLegacyLocalStorageSnapshots(): RecoverySnapshot[] {
             project: parsed.project,
             readModel: parsed.readModel ?? null,
             timestamp: parsed.timestamp ?? new Date().toISOString(),
+            currentFrame: 0,
+            selectedTrackId: null,
+            selectedKeyframeFrame: null,
           });
         }
       }
@@ -277,6 +299,9 @@ export function App() {
   const [doctor, setDoctor] = useState<DoctorData | null>(null);
   const [doctorWarnings, setDoctorWarnings] = useState<string[]>([]);
   const [doctorBusy, setDoctorBusy] = useState(false);
+  // M-D03: installed model management
+  const [installedModels, setInstalledModels] = useState<InstalledModelEntry[]>([]);
+  const [installedModelDir, setInstalledModelDir] = useState<string | null>(null);
 
   const [project, setProject] = useState<ProjectDocument | null>(null);
   const [readModel, setReadModel] = useState<ProjectReadModel | null>(null);
@@ -312,6 +337,7 @@ export function App() {
   const [exportQueue, setExportQueue] = useState<ExportQueueItem[]>([]);
   const [activeQueueId, setActiveQueueId] = useState<string | null>(null);
   const [exportPresets, setExportPresets] = useState<ExportPreset[]>([]);
+  const [modelManagerOpen, setModelManagerOpen] = useState(false);
   const [shortcutModalOpen, setShortcutModalOpen] = useState(false);
   const inspectorEnvironment = usePersistedDetails("environment", true);
   const inspectorDetect = usePersistedDetails("detect", true);
@@ -343,15 +369,12 @@ export function App() {
     dangers: ReturnType<typeof detectDangerousFrames>;
     settings: ExportSettings;
   } | null>(null);
+  const overwriteResolveRef = useRef<((mode: "protected" | "overwrite_all" | "cancel") => void) | null>(null);
+  const overwriteConfirmOpen = false;
+  const overwriteConfirmInfo = { trackCount: 0, manualCount: 0 };
 
   // 全体検出前の上書き確認モーダル
   // resolve が null でない間はモーダルが開いている。
-  const overwriteResolveRef = useRef<((mode: "protected" | "overwrite_all" | "cancel") => void) | null>(null);
-  const [overwriteConfirmOpen, setOverwriteConfirmOpen] = useState(false);
-  const [overwriteConfirmInfo, setOverwriteConfirmInfo] = useState<{
-    trackCount: number;
-    manualCount: number;
-  } | null>(null);
 
   // ジョブ通知の dismiss 管理
   const [dismissedJobIds, setDismissedJobIds] = useState<Set<string>>(new Set());
@@ -380,10 +403,15 @@ export function App() {
   const [detectContourMode, setDetectContourMode] = useState("quality");
   const [detectPreciseFaceContour, setDetectPreciseFaceContour] = useState(false);
   const [detectVramSavingMode, setDetectVramSavingMode] = useState(false);
+  const [overwriteManualTracks, setOverwriteManualTracks] = useState(false);
   const detectDefaultsAppliedRef = useRef(false);
   const [detectSelectedCategories, setDetectSelectedCategories] = useState<DetectorCategoryKey[]>(
     ["male_genitalia", "female_genitalia", "female_face"],
   );
+  // Detect settings persistence (M-D05): loaded from backend on mount,
+  // saved debounced on change. Guard against saving before initial load.
+  const detectSettingsLoadedRef = useRef(false);
+  const detectSettingsSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const currentVideo = readModel?.video ?? project?.video ?? null;
   const requiredModelNames = useMemo(
@@ -448,12 +476,26 @@ export function App() {
   }
 
   function restoreRecoverySnapshot(snapshot: RecoverySnapshot) {
+    const fallbackTrackId =
+      snapshot.selectedTrackId ??
+      snapshot.readModel?.track_summaries[0]?.track_id ??
+      snapshot.project.tracks[0]?.track_id ??
+      null;
+    const fallbackFrame =
+      typeof snapshot.currentFrame === "number"
+        ? snapshot.currentFrame
+        : (
+            snapshot.readModel?.track_summaries
+              .flatMap((track) => track.keyframes.map((keyframe) => keyframe.frame_index)) ??
+            snapshot.project.tracks.flatMap((track) => track.keyframes.map((keyframe) => keyframe.frame_index))
+          ).reduce<number | null>((min, frame) => (min === null || frame < min ? frame : min), null) ?? 0;
+
     setProject(snapshot.project);
     setReadModel(snapshot.readModel);
     setProjectDirty(true);
-    setSelectedTrackId(null);
-    setSelectedKeyframeFrame(null);
-    setCurrentFrame(0);
+    setSelectedTrackId(fallbackTrackId);
+    setSelectedKeyframeFrame(snapshot.selectedKeyframeFrame ?? null);
+    setCurrentFrame(fallbackFrame);
     setPreviewKeyframeOverride(null);
     setKeyframeRemoteError("");
     setConfirmedDangerFrames(new Set(snapshot.confirmedDangerFrames ?? []));
@@ -613,21 +655,31 @@ export function App() {
     return response.data.project_path;
   }
 
-  async function ensureEditableProjectPath() {
-    if (project?.project_path) {
-      return project.project_path;
-    }
-    setActivity(uiText.activity.savingBeforeEdit);
-    return handleSaveProject(false);
+  /**
+   * Build the project reference to send to a backend mutation command.
+   *
+   * Per `feedback_save_dialog_scope.md`, editing actions must NOT force a
+   * save dialog. When the project has no on-disk path yet, we send the
+   * full project document so the backend can mutate it in memory and
+   * return an updated snapshot (project_path=null response). The user
+   * still has to save explicitly via Ctrl+S / the save button to persist.
+   */
+  function projectRefForMutation(): { project_path: string } | { project: ProjectDocument } | null {
+    if (project?.project_path) return { project_path: project.project_path };
+    if (project) return { project };
+    return null;
   }
 
   async function handleCreateTrack(shapeType: KeyframeShapeType = "ellipse") {
     if (!project) return;
-    const projectPath = await ensureEditableProjectPath();
-    if (!projectPath) return;
     const response = await backend<MutationCommandData>(
       "create-track",
-      buildCreateTrackPayload({ projectPath, frameIndex: currentFrame, shapeType }),
+      buildCreateTrackPayload({
+        projectPath: project.project_path,
+        project,
+        frameIndex: currentFrame,
+        shapeType,
+      }),
     );
     if (!response.ok) {
       setErrorMessage(prettyError(response.error));
@@ -638,15 +690,16 @@ export function App() {
 
   async function handleDeleteTrack() {
     if (!selectedTrackId || !project) return;
-    const projectPath = await ensureEditableProjectPath();
-    if (!projectPath) return;
-    // Remove track by filtering it out and saving
+    // Remove track by filtering it out and saving back via save-project.
+    // save-project works in both on-disk and in-memory modes.
     const updatedTracks = project.tracks.filter((t) => t.track_id !== selectedTrackId);
     const updatedProject = { ...project, tracks: updatedTracks };
-    const response = await backend<MutationCommandData>("save-project", {
-      project_path: projectPath,
-      project: updatedProject,
-    });
+    const response = await backend<MutationCommandData>(
+      "save-project",
+      project.project_path
+        ? { project_path: project.project_path, project: updatedProject }
+        : { project: updatedProject },
+    );
     if (!response.ok) {
       setErrorMessage(prettyError(response.error));
       return;
@@ -658,59 +711,32 @@ export function App() {
 
   async function handleDuplicateTrack() {
     if (!selectedTrackId || !project) return;
-    const projectPath = await ensureEditableProjectPath();
-    if (!projectPath) return;
-    const sourceTrack = project.tracks.find((t) => t.track_id === selectedTrackId);
-    if (!sourceTrack) return;
-    const newTrackId = `track-dup-${Date.now()}`;
-    const duplicated = {
-      ...structuredClone(sourceTrack),
-      track_id: newTrackId,
-      label: `${sourceTrack.label} (copy)`,
-    };
-    const updatedProject = { ...project, tracks: [...project.tracks, duplicated] };
-    const response = await backend<MutationCommandData>("save-project", {
-      project_path: projectPath,
-      project: updatedProject,
+    const ref = projectRefForMutation();
+    if (!ref) return;
+    // Backend duplicate-track command owns the domain rules (segments,
+    // user_edited flags, track_id generation, apply_domain_rules).
+    const response = await backend<MutationCommandData>("duplicate-track", {
+      ...ref,
+      track_id: selectedTrackId,
     });
     if (!response.ok) {
       setErrorMessage(prettyError(response.error));
       return;
     }
     applyMutationResult(response.data);
-    setSelectedTrackId(newTrackId);
+    if (response.data.selection?.track_id) {
+      setSelectedTrackId(response.data.selection.track_id);
+    }
   }
 
   async function handleSplitTrack() {
     if (!selectedTrackId || !project) return;
-    const projectPath = await ensureEditableProjectPath();
-    if (!projectPath) return;
-    const sourceTrack = project.tracks.find((t) => t.track_id === selectedTrackId);
-    if (!sourceTrack || sourceTrack.keyframes.length < 2) {
-      setErrorMessage("Split requires at least 2 keyframes.");
-      return;
-    }
-    // Split at the current frame: keyframes before → track A, keyframes at/after → track B.
-    const before = sourceTrack.keyframes.filter((kf) => kf.frame_index < currentFrame);
-    const after = sourceTrack.keyframes.filter((kf) => kf.frame_index >= currentFrame);
-    if (before.length === 0 || after.length === 0) {
-      setErrorMessage("Cannot split: all keyframes are on one side of the playhead.");
-      return;
-    }
-    const newTrackId = `track-split-${Date.now()}`;
-    const trackA = { ...structuredClone(sourceTrack), keyframes: before };
-    const trackB = {
-      ...structuredClone(sourceTrack),
-      track_id: newTrackId,
-      label: `${sourceTrack.label} (B)`,
-      keyframes: after,
-    };
-    const updatedTracks = project.tracks.map((t) => (t.track_id === selectedTrackId ? trackA : t));
-    updatedTracks.push(trackB);
-    const updatedProject = { ...project, tracks: updatedTracks };
-    const response = await backend<MutationCommandData>("save-project", {
-      project_path: projectPath,
-      project: updatedProject,
+    const ref = projectRefForMutation();
+    if (!ref) return;
+    const response = await backend<MutationCommandData>("split-track", {
+      ...ref,
+      track_id: selectedTrackId,
+      split_frame: currentFrame,
     });
     if (!response.ok) {
       setErrorMessage(prettyError(response.error));
@@ -721,12 +747,12 @@ export function App() {
 
   async function handleToggleTrackVisible() {
     if (!selectedTrackId || !readModel) return;
-    const projectPath = await ensureEditableProjectPath();
-    if (!projectPath) return;
+    const ref = projectRefForMutation();
+    if (!ref) return;
     const selectedTrack = readModel.track_summaries.find((track) => track.track_id === selectedTrackId);
     if (!selectedTrack) return;
     const response = await backend<MutationCommandData>("update-track", {
-      project_path: projectPath,
+      ...ref,
       track_id: selectedTrackId,
       patch: { visible: !selectedTrack.visible },
     });
@@ -739,12 +765,12 @@ export function App() {
 
   async function handleToggleTrackExportEnabled() {
     if (!selectedTrackId || !readModel) return;
-    const projectPath = await ensureEditableProjectPath();
-    if (!projectPath) return;
+    const ref = projectRefForMutation();
+    if (!ref) return;
     const selectedTrack = readModel.track_summaries.find((track) => track.track_id === selectedTrackId);
     if (!selectedTrack) return;
     const response = await backend<MutationCommandData>("update-track", {
-      project_path: projectPath,
+      ...ref,
       track_id: selectedTrackId,
       patch: { export_enabled: !selectedTrack.export_enabled },
     });
@@ -757,10 +783,10 @@ export function App() {
 
   async function handleMoveSelectedKeyframe(delta: number) {
     if (!selectedTrackId || selectedKeyframeFrame === null) return;
-    const projectPath = await ensureEditableProjectPath();
-    if (!projectPath) return;
+    const ref = projectRefForMutation();
+    if (!ref) return;
     const response = await backend<MutationCommandData>("move-keyframe", {
-      project_path: projectPath,
+      ...ref,
       track_id: selectedTrackId,
       frame_index: selectedKeyframeFrame,
       target_frame_index: Math.max(0, selectedKeyframeFrame + delta),
@@ -835,10 +861,10 @@ export function App() {
 
   async function handleCreateKeyframe(payload: Omit<CreateKeyframePayload, "project_path" | "track_id">) {
     if (!selectedTrackId) return;
-    const projectPath = await ensureEditableProjectPath();
-    if (!projectPath) return;
+    const ref = projectRefForMutation();
+    if (!ref) return;
     const response = await backend<MutationCommandData>("create-keyframe", {
-      project_path: projectPath,
+      ...ref,
       track_id: selectedTrackId,
       ...payload,
     });
@@ -857,10 +883,10 @@ export function App() {
     if (selectedKeyframeFrame === currentFrame) return; // same frame, no-op
     const sourceKf = selectedTrackDocument?.keyframes.find((kf) => kf.frame_index === selectedKeyframeFrame);
     if (!sourceKf) return;
-    const projectPath = await ensureEditableProjectPath();
-    if (!projectPath) return;
+    const ref = projectRefForMutation();
+    if (!ref) return;
     const response = await backend<MutationCommandData>("create-keyframe", {
-      project_path: projectPath,
+      ...ref,
       track_id: selectedTrackId,
       frame_index: currentFrame,
       source: "manual",
@@ -881,10 +907,10 @@ export function App() {
 
   async function handleDeleteKeyframe() {
     if (!selectedTrackId || selectedKeyframeFrame === null) return;
-    const projectPath = await ensureEditableProjectPath();
-    if (!projectPath) return;
+    const ref = projectRefForMutation();
+    if (!ref) return;
     const response = await backend<MutationCommandData>("delete-keyframe", {
-      project_path: projectPath,
+      ...ref,
       track_id: selectedTrackId,
       frame_index: selectedKeyframeFrame,
     });
@@ -916,6 +942,7 @@ export function App() {
   }
 
   async function handleFetchModels() {
+    if (activeRuntimeByKind.get("fetch_models")) return;
     const requiredMissing = requiredModelNames.length ? requiredModelNames : ["320n.onnx"];
     const autoFetchMissing = (doctor?.models?.optional ?? [])
       .filter((m) => m.auto_fetch && !isModelInstalled(m))
@@ -958,6 +985,7 @@ export function App() {
       contour_mode: detectContourMode,
       vram_saving_mode: detectVramSavingMode,
       enabled_label_categories: categories,
+      overwrite_manual_tracks: overwriteManualTracks,
       sample_every: 1,
       max_samples: 1,
       start_frame: currentFrame,
@@ -981,19 +1009,6 @@ export function App() {
     if (!project) return;
 
     // 既存トラックがある場合: 上書き確認モーダルを出す
-    let overwriteManualTracks = false;
-    if (project.tracks.length > 0) {
-      const manualCount = project.tracks.filter((t) => t.user_edited || t.source === "manual").length;
-      setOverwriteConfirmInfo({ trackCount: project.tracks.length, manualCount });
-      const mode = await new Promise<"protected" | "overwrite_all" | "cancel">((resolve) => {
-        overwriteResolveRef.current = resolve;
-        setOverwriteConfirmOpen(true);
-      });
-      setOverwriteConfirmOpen(false);
-      overwriteResolveRef.current = null;
-      if (mode === "cancel") return;
-      overwriteManualTracks = mode === "overwrite_all";
-    }
 
     // Only send categories the selected backend actually supports
     const categories = detectSelectedCategories.filter((cat) =>
@@ -1061,7 +1076,15 @@ export function App() {
 
   async function runExportWithSettings(settings: ExportSettings) {
     if (!project) return;
-    // 常に最新編集を保存してからエクスポートする
+    // 書き出しキューは file-backed なので project_path が必須。
+    // 未保存状態で書き出しダイアログを開くのを避けるため、ここでは
+    // 保存ダイアログを立ち上げず、明示的な保存を促すエラーを返す。
+    if (!project.project_path) {
+      setErrorMessage("プロジェクトを保存してから書き出してください (Ctrl+S)。");
+      return;
+    }
+    // 保存済みプロジェクトでも最新編集を取り込むため、もう一度保存する。
+    // project_path 済みなので save ダイアログは出ない。
     setActivity(uiText.activity.savingBeforeExport);
     const projectPath = await handleSaveProject(false);
     if (!projectPath) {
@@ -1081,6 +1104,15 @@ export function App() {
     const options = {
       mosaic_strength: settings.mosaic_strength,
       audio_mode: settings.audio_mode,
+      resolution: settings.resolution,
+      bitrate_kbps: settings.bitrate_kbps,
+      encoder: settings.encoder,
+      fps_mode: settings.fps_mode,
+      fps_custom: settings.fps_custom,
+      bitrate_mode: settings.bitrate_mode,
+      target_size_mb: settings.target_size_mb,
+      video_codec: settings.video_codec,
+      container: settings.container,
     };
     const enqueueResponse = await backend<{ item: ExportQueueItem; items: ExportQueueItem[] }>(
       "enqueue-export",
@@ -1141,6 +1173,15 @@ export function App() {
       options: {
         mosaic_strength: item.options.mosaic_strength,
         audio_mode: item.options.audio_mode,
+        resolution: item.options.resolution,
+        bitrate_kbps: item.options.bitrate_kbps,
+        encoder: item.options.encoder,
+        fps_mode: item.options.fps_mode,
+        fps_custom: item.options.fps_custom,
+        bitrate_mode: item.options.bitrate_mode,
+        target_size_mb: item.options.target_size_mb,
+        video_codec: item.options.video_codec,
+        container: item.options.container,
       },
     });
 
@@ -1287,26 +1328,53 @@ export function App() {
       // Ctrl+D: Duplicate keyframe / Ctrl+Shift+D: Detect current frame
       if (ctrl && e.key === "d" && !shift) { e.preventDefault(); void handleDuplicateKeyframe(); return; }
       if (ctrl && e.key === "D") { e.preventDefault(); void handleDetectCurrentFrame(); return; }
+      // Ctrl+Shift+R: Range detect (uses I/O markers when set, full project otherwise)
+      if (ctrl && (e.key === "R" || e.key === "r") && shift) { e.preventDefault(); void handleDetect(); return; }
+      // Ctrl+M: Open export settings modal
+      if (ctrl && (e.key === "m" || e.key === "M") && !shift) {
+        e.preventDefault();
+        handleExportClick();
+        return;
+      }
       // Ctrl+S: Save
       if (ctrl && e.key === "s" && !shift) { e.preventDefault(); void handleSaveProject(false); return; }
       // Ctrl+Shift+S: Save As
       if (ctrl && e.key === "S") { e.preventDefault(); void handleSaveProject(true); return; }
 
+      // F1 always works (no project required) so users can see help at startup.
+      if (e.key === "F1") {
+        e.preventDefault();
+        setShortcutModalOpen((value) => !value);
+        return;
+      }
+
       // The following shortcuts require an active project.
       if (!project) return;
 
-      // Home/End: jump to first/last frame
+      // Home/End: jump to first/last frame (Shift+Home/End: track start/end)
       if (e.key === "Home") {
         e.preventDefault();
-        setCurrentFrame(0);
-        handleSeekFrame(0);
+        if (shift && selectedTrack) {
+          const target = selectedTrack.start_frame ?? 0;
+          setCurrentFrame(target);
+          handleSeekFrame(target);
+        } else {
+          setCurrentFrame(0);
+          handleSeekFrame(0);
+        }
         return;
       }
       if (e.key === "End") {
         e.preventDefault();
-        const last = Math.max(0, (currentVideo?.frame_count ?? 1) - 1);
-        setCurrentFrame(last);
-        handleSeekFrame(last);
+        if (shift && selectedTrack) {
+          const target = selectedTrack.end_frame ?? Math.max(0, (currentVideo?.frame_count ?? 1) - 1);
+          setCurrentFrame(target);
+          handleSeekFrame(target);
+        } else {
+          const last = Math.max(0, (currentVideo?.frame_count ?? 1) - 1);
+          setCurrentFrame(last);
+          handleSeekFrame(last);
+        }
         return;
       }
       // Arrow Left/Right: ±1 frame (Shift: ±10)
@@ -1356,14 +1424,14 @@ export function App() {
         void handleDeleteKeyframe();
         return;
       }
-      // [: Previous keyframe
-      if (e.key === "[") {
+      // [ or ArrowUp: Previous keyframe
+      if (e.key === "[" || e.key === "ArrowUp") {
         e.preventDefault();
         void handleMoveSelectedKeyframe(-1);
         return;
       }
-      // ]: Next keyframe
-      if (e.key === "]") {
+      // ] or ArrowDown: Next keyframe
+      if (e.key === "]" || e.key === "ArrowDown") {
         e.preventDefault();
         void handleMoveSelectedKeyframe(1);
         return;
@@ -1414,12 +1482,7 @@ export function App() {
         void handleDeleteTrack();
         return;
       }
-      // F1: Show keyboard shortcuts
-      if (e.key === "F1") {
-        e.preventDefault();
-        setShortcutModalOpen(true);
-        return;
-      }
+      // F1 handled above (before the project guard).
     }
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
@@ -1440,6 +1503,9 @@ export function App() {
       project,
       read_model: readModel,
       timestamp: new Date().toISOString(),
+      current_frame: currentFrame,
+      selected_track_id: selectedTrackId,
+      selected_keyframe_frame: selectedKeyframeFrame,
       confirmed_danger_frames: Array.from(confirmedDangerFrames),
     });
 
@@ -1463,6 +1529,51 @@ export function App() {
     }
   }, [project, projectDirty]);
 
+  // Debounced detect-settings save (M-D05): persist when any detect input
+  // changes, but skip the initial load hydration.
+  useEffect(() => {
+    if (!detectSettingsLoadedRef.current) return;
+    if (detectSettingsSaveTimerRef.current) clearTimeout(detectSettingsSaveTimerRef.current);
+    detectSettingsSaveTimerRef.current = setTimeout(() => {
+      detectSettingsSaveTimerRef.current = null;
+      void backend("save-detect-settings", {
+        settings: {
+          backend: detectBackend,
+          device: detectDevice,
+          confidence_threshold: detectThreshold,
+          sample_every: detectSampleEvery,
+          max_samples: detectMaxSamples,
+          inference_resolution: detectInferenceResolution,
+          batch_size: detectBatchSize,
+          contour_mode: detectContourMode,
+          precise_face_contour: detectPreciseFaceContour,
+          vram_saving_mode: detectVramSavingMode,
+          overwrite_manual_tracks: overwriteManualTracks,
+          selected_categories: detectSelectedCategories,
+        },
+      });
+    }, 800);
+    return () => {
+      if (detectSettingsSaveTimerRef.current) {
+        clearTimeout(detectSettingsSaveTimerRef.current);
+        detectSettingsSaveTimerRef.current = null;
+      }
+    };
+  }, [
+    detectBackend,
+    detectDevice,
+    detectThreshold,
+    detectSampleEvery,
+    detectMaxSamples,
+    detectInferenceResolution,
+    detectBatchSize,
+    detectContourMode,
+    detectPreciseFaceContour,
+    detectVramSavingMode,
+    overwriteManualTracks,
+    detectSelectedCategories,
+  ]);
+
   // Debounced recovery snapshot: update backend store when project content
   // changes while dirty, so force-kill loses at most ~5 seconds of work.
   useEffect(() => {
@@ -1475,6 +1586,9 @@ export function App() {
         project,
         read_model: readModel,
         timestamp: new Date().toISOString(),
+        current_frame: currentFrame,
+        selected_track_id: selectedTrackId,
+        selected_keyframe_frame: selectedKeyframeFrame,
         confirmed_danger_frames: Array.from(confirmedDangerFrames),
       });
     }, 5_000);
@@ -1484,7 +1598,7 @@ export function App() {
         recoveryDebounceRef.current = null;
       }
     };
-  }, [project, readModel, projectDirty]);
+  }, [project, readModel, projectDirty, currentFrame, selectedTrackId, selectedKeyframeFrame, confirmedDangerFrames]);
 
   // Startup: check for recovery snapshot.
   useEffect(() => {
@@ -1517,7 +1631,84 @@ export function App() {
   useEffect(() => {
     void reloadExportQueue();
     void reloadExportPresets();
+    void reloadDetectSettings();
+    void reloadInstalledModels();
   }, []);
+
+  async function reloadInstalledModels() {
+    const response = await backend<{
+      model_dir: string;
+      items: InstalledModelEntry[];
+    }>("list-installed-models", {});
+    if (!response.ok) return;
+    setInstalledModels(response.data.items);
+    setInstalledModelDir(response.data.model_dir);
+  }
+
+  async function handleDeleteInstalledModel(name: string) {
+    if (!window.confirm(`モデル "${name}" を削除しますか?`)) return;
+    const response = await backend<{ name: string; deleted: boolean }>(
+      "delete-installed-model",
+      { name },
+    );
+    if (!response.ok) {
+      setErrorMessage(prettyError(response.error));
+      return;
+    }
+    await reloadInstalledModels();
+    // Refresh doctor so required-model status updates if user deleted a required file.
+    await runDoctor();
+  }
+
+  async function reloadDetectSettings() {
+    const response = await backend<{
+      settings:
+        | null
+        | {
+            backend?: string;
+            device?: string;
+            confidence_threshold?: number;
+            sample_every?: number;
+            max_samples?: number;
+            inference_resolution?: number;
+            batch_size?: number;
+            contour_mode?: string;
+            precise_face_contour?: boolean;
+            vram_saving_mode?: boolean;
+            overwrite_manual_tracks?: boolean;
+            selected_categories?: string[];
+          };
+      broken: boolean;
+    }>("load-detect-settings", {});
+    if (!response.ok) {
+      // Treat load failure as "no settings yet"; allow doctor-based defaults.
+      detectSettingsLoadedRef.current = true;
+      return;
+    }
+    const data = response.data.settings;
+    if (data) {
+      if (typeof data.backend === "string") {
+        const known = DETECTOR_OPTIONS.find((opt) => opt.key === data.backend);
+        if (known) setDetectBackend(known.key as DetectorBackendKey);
+      }
+      if (typeof data.device === "string") setDetectDevice(data.device);
+      if (typeof data.confidence_threshold === "number") setDetectThreshold(data.confidence_threshold);
+      if (typeof data.sample_every === "number") setDetectSampleEvery(data.sample_every);
+      if (typeof data.max_samples === "number") setDetectMaxSamples(data.max_samples);
+      if (typeof data.inference_resolution === "number") setDetectInferenceResolution(data.inference_resolution);
+      if (typeof data.batch_size === "number") setDetectBatchSize(data.batch_size);
+      if (typeof data.contour_mode === "string") setDetectContourMode(data.contour_mode);
+      if (typeof data.precise_face_contour === "boolean") setDetectPreciseFaceContour(data.precise_face_contour);
+      if (typeof data.vram_saving_mode === "boolean") setDetectVramSavingMode(data.vram_saving_mode);
+      if (typeof data.overwrite_manual_tracks === "boolean") setOverwriteManualTracks(data.overwrite_manual_tracks);
+      if (Array.isArray(data.selected_categories)) {
+        setDetectSelectedCategories(data.selected_categories as DetectorCategoryKey[]);
+      }
+      // Block doctor-based defaults from overwriting restored user settings.
+      detectDefaultsAppliedRef.current = true;
+    }
+    detectSettingsLoadedRef.current = true;
+  }
 
   async function reloadExportPresets() {
     const response = await backend<{ items: ExportPreset[] }>("list-export-presets", {});
@@ -1558,6 +1749,9 @@ export function App() {
             project: snap.project,
             read_model: snap.readModel,
             timestamp: snap.timestamp,
+            current_frame: snap.currentFrame ?? 0,
+            selected_track_id: snap.selectedTrackId ?? null,
+            selected_keyframe_frame: snap.selectedKeyframeFrame ?? null,
           });
           removeLegacyLocalStorageSnapshot(snap.id);
         } catch {
@@ -1572,6 +1766,9 @@ export function App() {
             project: ProjectDocument;
             read_model: ProjectReadModel | null;
             timestamp: string;
+            current_frame?: number;
+            selected_track_id?: string | null;
+            selected_keyframe_frame?: number | null;
             confirmed_danger_frames?: string[];
           }[];
         }>("list-recovery-snapshots", {});
@@ -1582,6 +1779,9 @@ export function App() {
               project: snap.project,
               readModel: snap.read_model ?? null,
               timestamp: snap.timestamp || new Date().toISOString(),
+              currentFrame: typeof snap.current_frame === "number" ? snap.current_frame : 0,
+              selectedTrackId: typeof snap.selected_track_id === "string" ? snap.selected_track_id : null,
+              selectedKeyframeFrame: typeof snap.selected_keyframe_frame === "number" ? snap.selected_keyframe_frame : null,
               confirmedDangerFrames: snap.confirmed_danger_frames ?? [],
             });
           }
@@ -1985,6 +2185,9 @@ export function App() {
             <button className="nle-menu__item" onClick={() => void handleSaveProject(true)} disabled={!project} type="button">{uiText.app.saveProjectAs}</button>
           </div>
         </div>
+        <button className="nle-menubar__button" onClick={() => setModelManagerOpen(true)} type="button">
+          Model Manager...
+        </button>
       </nav>
 
       <header className="nle-header">
@@ -2049,7 +2252,7 @@ export function App() {
               <div className="nle-video-info__row"><span className="nle-video-info__label">{uiText.project.name}</span><span className="nle-video-info__value">{project?.name ?? uiText.project.none}</span></div>
               <div className="nle-video-info__row"><span className="nle-video-info__label">{uiText.project.path}</span><span className="nle-video-info__value">{project?.project_path ?? uiText.project.unsaved}</span></div>
               <div className="nle-video-info__row"><span className="nle-video-info__label">{uiText.project.tracks}</span><span className="nle-video-info__value">{readModel?.track_count ?? 0}</span></div>
-              <div className="nle-video-info__row"><span className="nle-video-info__label">{uiText.project.state}</span><span className="nle-video-info__value">{projectDirty ? uiText.project.dirty : uiText.project.saved}</span></div>
+              <div className="nle-video-info__row"><span className="nle-video-info__label">{uiText.project.state}</span><span className="nle-video-info__value">{!project ? "—" : projectDirty ? uiText.project.dirty : uiText.project.saved}</span></div>
             </div>
           </div>
         </section>
@@ -2065,6 +2268,8 @@ export function App() {
           }
           onSeekFrame={handleSeekFrame}
         />
+        {false && (
+          <>
         <section className="nle-panel-section nle-panel-section--grow">
           <div className="nle-panel-header">{uiText.panels.models}</div>
           <div className="nle-panel-body">
@@ -2100,6 +2305,71 @@ export function App() {
             })()}
           </div>
         </section>
+
+        <section className="nle-panel-section">
+          <div className="nle-panel-header">
+            導入済みモデル
+            <button
+              className="nle-btn nle-btn--small"
+              style={{ marginLeft: "auto" }}
+              onClick={() => void reloadInstalledModels()}
+              title="再読み込み"
+            >
+              ↻
+            </button>
+          </div>
+          <div className="nle-panel-body">
+            {installedModelDir ? (
+              <div style={{ fontSize: "0.8em", color: "#888", marginBottom: 4, wordBreak: "break-all" }}>
+                {installedModelDir}
+              </div>
+            ) : null}
+            {!installedModels.length ? (
+              <div className="nle-empty">モデルフォルダは空です</div>
+            ) : (
+              <ul className="nle-track-list">
+                {installedModels.map((m) => {
+                  const sizeMb = (m.size_bytes / (1024 * 1024)).toFixed(1);
+                  const statusColor =
+                    m.status === "installed" ? "#4caf50" : m.status === "broken" ? "#e55" : "#999";
+                  return (
+                    <li key={m.name} className="nle-track-item" style={{ alignItems: "flex-start" }}>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div className="nle-track-item__name" style={{ wordBreak: "break-all" }}>
+                          {m.name}
+                          {m.required && (
+                            <span style={{ color: "#e55", marginLeft: 4, fontSize: "0.8em" }}>*</span>
+                          )}
+                          {!m.known && (
+                            <span
+                              style={{ color: "#888", marginLeft: 4, fontSize: "0.75em" }}
+                              title="カタログに登録されていないファイル"
+                            >
+                              (未登録)
+                            </span>
+                          )}
+                        </div>
+                        <div style={{ fontSize: "0.75em", color: "#888" }}>
+                          {sizeMb} MB · <span style={{ color: statusColor }}>{m.status}</span>
+                          {m.source_label ? ` · ${m.source_label}` : ""}
+                        </div>
+                      </div>
+                      <button
+                        className="nle-btn nle-btn--small"
+                        onClick={() => void handleDeleteInstalledModel(m.name)}
+                        title="このモデルファイルを削除"
+                      >
+                        削除
+                      </button>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+          </div>
+        </section>
+          </>
+        )}
       </aside>
 
       <section className="nle-preview">
@@ -2185,6 +2455,8 @@ export function App() {
 
       <aside className="nle-right">
         <div className="nle-right__scroll">
+          {false && (
+            <>
           <details className="nle-inspector-section" open={inspectorEnvironment.open} onToggle={inspectorEnvironment.onToggle}>
             <summary className="nle-inspector-section__header">{uiText.panels.environment}</summary>
             <div className="nle-inspector-section__body">
@@ -2199,9 +2471,9 @@ export function App() {
             <div className="nle-inspector-section__body">
               {activeDetectJob ? (
                 <>
-                  <div className="nle-meta-row"><span className="nle-meta-row__label">{uiText.jobs.stage}</span><span className="nle-meta-row__value">{activeDetectJob.stage}</span></div>
-                  <div className="nle-meta-row"><span className="nle-meta-row__label">{uiText.jobs.progress}</span><span className="nle-meta-row__value">{activeDetectJob.percent.toFixed(0)}%</span></div>
-                  <p>{activeDetectJob.message}</p>
+                  <div className="nle-meta-row"><span className="nle-meta-row__label">{uiText.jobs.stage}</span><span className="nle-meta-row__value">{activeDetectJob?.stage ?? ""}</span></div>
+                  <div className="nle-meta-row"><span className="nle-meta-row__label">{uiText.jobs.progress}</span><span className="nle-meta-row__value">{activeDetectJob?.percent?.toFixed(0) ?? "0"}%</span></div>
+                  <p>{activeDetectJob?.message ?? ""}</p>
                 </>
               ) : (
                 <div className="nle-empty">{uiText.detect.idle}</div>
@@ -2213,9 +2485,9 @@ export function App() {
             <div className="nle-inspector-section__body">
               {exportStatus ? (
                 <>
-                  <div className="nle-meta-row"><span className="nle-meta-row__label">{uiText.jobs.stage}</span><span className="nle-meta-row__value">{exportStatus.phase}</span></div>
-                  <div className="nle-meta-row"><span className="nle-meta-row__label">{uiText.jobs.progress}</span><span className="nle-meta-row__value">{Math.round(exportStatus.progress * 100)}%</span></div>
-                  <p>{exportStatus.message}</p>
+                  <div className="nle-meta-row"><span className="nle-meta-row__label">{uiText.jobs.stage}</span><span className="nle-meta-row__value">{exportStatus?.phase ?? ""}</span></div>
+                  <div className="nle-meta-row"><span className="nle-meta-row__label">{uiText.jobs.progress}</span><span className="nle-meta-row__value">{Math.round((exportStatus?.progress ?? 0) * 100)}%</span></div>
+                  <p>{exportStatus?.message ?? ""}</p>
                   {lastExportOutputPath ? <p>{lastExportOutputPath}</p> : null}
                 </>
               ) : (
@@ -2223,6 +2495,8 @@ export function App() {
               )}
             </div>
           </details>
+            </>
+          )}
           <details className="nle-inspector-section" open={inspectorTrackDetail.open} onToggle={inspectorTrackDetail.onToggle}>
             <summary className="nle-inspector-section__header">{uiText.panels.trackDetail}</summary>
             <div className="nle-inspector-section__body">
@@ -2266,6 +2540,7 @@ export function App() {
       </aside>
 
       <div className="nle-transport">
+        <div className="nle-transport__controls">
         <button className="nle-transport__btn" onClick={() => { setCurrentFrame(0); handleSeekFrame(0); }} title="先頭へ">⏮</button>
         <button className="nle-transport__btn" onClick={() => { const f = Math.max(0, currentFrame - 1); setCurrentFrame(f); handleSeekFrame(f); }} title="1フレーム戻す">⏪</button>
         <button className="nle-transport__btn nle-transport__btn--play" onClick={() => { if (videoRef.current) { videoRef.current.paused ? videoRef.current.play() : videoRef.current.pause(); } }} title="再生 / 一時停止">
@@ -2273,6 +2548,8 @@ export function App() {
         </button>
         <button className="nle-transport__btn" onClick={() => { const max = (currentVideo?.frame_count ?? 1) - 1; const f = Math.min(max, currentFrame + 1); setCurrentFrame(f); handleSeekFrame(f); }} title="1フレーム送る">⏩</button>
         <button className="nle-transport__btn" onClick={() => { const last = (currentVideo?.frame_count ?? 1) - 1; setCurrentFrame(last); handleSeekFrame(last); }} title="末尾へ">⏭</button>
+        </div>
+        <div className="nle-transport__meta">
         <select
           className="nle-transport__speed"
           value={playbackRate}
@@ -2288,6 +2565,7 @@ export function App() {
           <option value={4}>4x</option>
         </select>
         <span className="nle-transport__time">F{currentFrame}{currentVideo?.fps ? ` / ${(currentFrame / currentVideo.fps).toFixed(2)}s` : ""}</span>
+        </div>
       </div>
 
       <section className="nle-timeline">
@@ -2429,6 +2707,9 @@ export function App() {
         batchSize={detectBatchSize}
         contourMode={detectContourMode}
         vramSavingMode={detectVramSavingMode}
+        overwriteManualTracks={overwriteManualTracks}
+        trackCount={project?.tracks.length ?? 0}
+        manualTrackCount={project?.tracks.filter((track) => track.user_edited || track.source === "manual").length ?? 0}
         selectedCategories={detectSelectedCategories}
         availableModels={detectAvailableModels}
         requiredModels={detectRequiredModels}
@@ -2450,6 +2731,7 @@ export function App() {
         onBatchSizeChange={setDetectBatchSize}
         onContourModeChange={setDetectContourMode}
         onVramSavingModeChange={setDetectVramSavingMode}
+        onOverwriteManualTracksChange={setOverwriteManualTracks}
         onToggleCategory={(cat) =>
           setDetectSelectedCategories((current) =>
             current.includes(cat) ? current.filter((c) => c !== cat) : [...current, cat],
@@ -2470,6 +2752,17 @@ export function App() {
         presets={exportPresets}
         onSavePreset={handleSaveExportPreset}
         onDeletePreset={handleDeleteExportPreset}
+      />
+
+      <ModelManagerModal
+        open={modelManagerOpen}
+        onClose={() => setModelManagerOpen(false)}
+        doctor={doctor}
+        installedModels={installedModels}
+        installedModelDir={installedModelDir}
+        onDeleteInstalledModel={(name) => void handleDeleteInstalledModel(name)}
+        onReloadInstalled={() => void reloadInstalledModels()}
+        onFetchModels={() => void handleFetchModels()}
       />
 
       <ShortcutHelpModal open={shortcutModalOpen} onClose={() => setShortcutModalOpen(false)} />
@@ -2586,7 +2879,7 @@ export function App() {
 
       <footer className="nle-statusbar">
         <span className="nle-statusbar__item">{project?.name ?? uiText.project.none}</span>
-        <span className="nle-statusbar__item">{projectDirty ? uiText.project.dirty : uiText.project.saved}</span>
+        <span className="nle-statusbar__item">{!project ? "—" : projectDirty ? uiText.project.dirty : uiText.project.saved}</span>
         <span className="nle-statusbar__item">{currentVideo ? `${currentVideo.width} x ${currentVideo.height}` : "--"}</span>
         <span className="nle-statusbar__item">{currentVideo ? `${currentVideo.fps.toFixed(2)} fps` : "--"}</span>
         <span className="nle-statusbar__item">{currentVideo ? `${currentVideo.frame_count} fr` : "--"}</span>

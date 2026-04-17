@@ -334,6 +334,28 @@ body,
   color: #ffb8b8;
 }
 
+.nle-modal-overlay {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(0, 0, 0, 0.62);
+  z-index: 1000;
+}
+
+.nle-modal {
+  width: min(720px, calc(100vw - 48px));
+  max-height: calc(100vh - 48px);
+  overflow: auto;
+  padding: 20px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--bg-panel);
+  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.45);
+}
+
 /* ============================================================
    LEFT PANEL — Tracks & Project
    ============================================================ */
@@ -1053,6 +1075,7 @@ body,
 .canvas-stage__context-menu {
   position: absolute;
   z-index: 12;
+  pointer-events: auto;
   min-width: 112px;
   display: flex;
   flex-direction: column;
@@ -1323,15 +1346,23 @@ body,
    ============================================================ */
 .nle-transport {
   grid-area: transport;
-  display: flex;
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
   align-items: center;
-  justify-content: center;
-  gap: 2px;
+  gap: 8px;
   padding: 2px 8px;
   background: var(--bg-panel);
   border-top: 1px solid var(--border);
   border-bottom: 1px solid var(--border);
   min-height: 28px;
+}
+
+.nle-transport__controls {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  grid-column: 2;
 }
 .nle-transport__btn {
   background: none;
@@ -1347,16 +1378,23 @@ body,
 .nle-transport__btn--play { font-size: 1.1em; padding: 2px 12px; }
 
 .nle-transport__speed {
-  margin-left: 6px;
-  padding: 2px 6px;
-  font-size: 12px;
+  width: auto;
+  min-width: 0;
+  padding: 2px 4px;
+  font-size: 11px;
   background: var(--bg);
   border: 1px solid var(--border);
   border-radius: 3px;
   color: var(--text);
 }
+.nle-transport__meta {
+  grid-column: 3;
+  justify-self: end;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
 .nle-transport__time {
-  margin-left: 12px;
   font-size: 0.8em;
   color: var(--fg-muted);
   font-variant-numeric: tabular-nums;
@@ -2168,6 +2206,25 @@ button {
   z-index: 50;
 }
 
+.nle-menubar__button {
+  display: inline-flex;
+  align-items: center;
+  height: 28px;
+  padding: 0 10px;
+  background: transparent;
+  border: none;
+  color: var(--text);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  white-space: nowrap;
+  -webkit-app-region: no-drag;
+}
+
+.nle-menubar__button:hover {
+  background: rgba(255, 255, 255, 0.1);
+}
+
 .nle-menu {
   position: relative;
   -webkit-app-region: no-drag;
@@ -2330,13 +2387,23 @@ button {
 /* ============================================================
    TIMELINE KF COLOR CLASSES
    ============================================================ */
-.nle-tl-row__marker--manual         { background: #F59E0B; }
-.nle-tl-row__marker--auto           { background: #22C55E; }
-/* detector_anchored: blue ring to distinguish from plain accepted */
-.nle-tl-row__marker--auto-anchored  { background: #3B82F6; box-shadow: 0 0 0 1px rgba(59,130,246,0.5); }
+/* Spec alignment (feature_list §5-1):
+   - manual        → white
+   - auto          → gold
+   - predicted     → gray
+   - re_detected   → light blue
+   - contour_follow→ green
+   interpolated stays near-white (interpolation is not a source value that
+   is usually visualised, but we keep it around for legacy payloads).
+   detector_anchored is a detector sub-variant that gets a blue ring so
+   anchored keyframes stay distinguishable from plain accepted ones. */
+.nle-tl-row__marker--manual         { background: #FFFFFF; box-shadow: 0 0 0 1px rgba(0,0,0,0.35); }
+.nle-tl-row__marker--auto           { background: #F5C518; }
+.nle-tl-row__marker--auto-anchored  { background: #F5C518; box-shadow: 0 0 0 1px rgba(59,130,246,0.8); }
 .nle-tl-row__marker--interpolated   { background: #E0E0E0; }
-.nle-tl-row__marker--predicted      { background: #888888; }
-.nle-tl-row__marker--re-detected    { background: #3B82F6; }
+.nle-tl-row__marker--predicted      { background: #9CA3AF; }
+.nle-tl-row__marker--re-detected    { background: #60A5FA; }
+.nle-tl-row__marker--contour-follow { background: #22C55E; }
 
 /* ============================================================
    TIMELINE SEGMENT BARS
@@ -2396,9 +2463,12 @@ button {
 }
 
 /* KF marker legend */
-.nle-tl-legend__item--manual         { color: #F59E0B; }
-.nle-tl-legend__item--auto           { color: #22C55E; }
+.nle-tl-legend__item--manual         { color: #FFFFFF; }
+.nle-tl-legend__item--auto           { color: #F5C518; }
 .nle-tl-legend__item--auto-anchored  { color: #3B82F6; }
+.nle-tl-legend__item--predicted      { color: #9CA3AF; }
+.nle-tl-legend__item--re-detected    { color: #60A5FA; }
+.nle-tl-legend__item--contour-follow { color: #22C55E; }
 .nle-tl-legend__item--interpolated   { color: #E0E0E0; }
 .nle-tl-legend__item--predicted      { color: #888888; }
 .nle-tl-legend__item--re-detected    { color: #3B82F6; }
@@ -2902,6 +2972,151 @@ button {
   border: 1px solid var(--border);
 }
 .nle-model-status:has(span) { display: none; }
+
+.model-manager-modal {
+  width: min(880px, calc(100vw - 48px));
+}
+
+.model-manager-modal__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.model-manager-modal__subhead {
+  margin-top: 4px;
+  font-size: 12px;
+  color: var(--text-dim);
+}
+
+.model-manager-modal__content {
+  display: grid;
+  gap: 14px;
+}
+
+.model-manager-modal__section {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 14px;
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.model-manager-modal__section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.model-manager-modal__section-header h4 {
+  margin: 0;
+  font-size: 13px;
+}
+
+.model-manager-modal__grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.model-manager-modal__cell {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: rgba(0, 0, 0, 0.16);
+}
+
+.model-manager-modal__label {
+  font-size: 11px;
+  color: var(--text-dim);
+}
+
+.model-manager-modal__value {
+  font-size: 13px;
+  color: var(--text);
+}
+
+.model-manager-modal__dir {
+  margin-bottom: 10px;
+  font-size: 11px;
+  color: var(--text-dim);
+  word-break: break-all;
+}
+
+.model-manager-modal__list {
+  list-style: none;
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+}
+
+.model-manager-modal__item {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: rgba(0, 0, 0, 0.16);
+}
+
+.model-manager-modal__item-main {
+  min-width: 0;
+  flex: 1;
+}
+
+.model-manager-modal__title {
+  font-size: 13px;
+  color: var(--text);
+  word-break: break-all;
+}
+
+.model-manager-modal__required {
+  margin-left: 4px;
+  color: #e55;
+}
+
+.model-manager-modal__unknown {
+  margin-left: 6px;
+  font-size: 11px;
+  color: var(--text-dim);
+}
+
+.model-manager-modal__meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 4px;
+  font-size: 11px;
+  color: var(--text-dim);
+}
+
+.model-manager-modal__note {
+  margin-top: 4px;
+  font-size: 11px;
+  color: var(--text-dim);
+  line-height: 1.45;
+}
+
+@media (max-width: 760px) {
+  .model-manager-modal__grid {
+    grid-template-columns: 1fr;
+  }
+
+  .model-manager-modal__section-header,
+  .model-manager-modal__item {
+    flex-direction: column;
+    align-items: stretch;
+  }
+}
 
 /* ============================================================
    COLLAPSIBLE INSPECTOR SECTIONS (details/summary)

@@ -157,11 +157,32 @@ export type MutationCommandData = {
   selection: EditorSelection;
 };
 
-export type ExportAudioMode = "mux_if_possible" | "video_only";
+export type ExportAudioMode =
+  | "mux_if_possible"
+  | "video_only"
+  | "copy_if_possible"
+  | "encode"
+  | "none";
+
+export type ExportFpsMode = "source" | "custom";
+export type ExportBitrateMode = "auto" | "manual" | "target_size";
+export type ExportVideoCodec = "h264" | "vp9";
+export type ExportContainer = "auto" | "mp4" | "mov" | "webm";
 
 export type ExportOptions = {
   mosaic_strength: number;
   audio_mode: ExportAudioMode;
+  // All optional for backward compat (legacy queue items only had mosaic + audio).
+  resolution?: string;
+  bitrate_kbps?: number | null;
+  encoder?: "auto" | "gpu" | "cpu";
+  // M-B03 extended settings.
+  fps_mode?: ExportFpsMode;
+  fps_custom?: number | null;
+  bitrate_mode?: ExportBitrateMode;
+  target_size_mb?: number | null;
+  video_codec?: ExportVideoCodec;
+  container?: ExportContainer;
 };
 
 export type ProjectExportPreset = ExportOptions & {

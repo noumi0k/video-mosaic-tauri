@@ -1,6 +1,6 @@
 # 不足機能マトリクス
 
-最終更新: 2026-04-17 (Phase A / B core / C core / D 完了)
+最終更新: 2026-04-17 (Phase A / B / C core / D 完了 + Phase E: M-B03 partial 拡張 / M-D03 / M-D05 完了)
 
 この文書は、追加された仕様書 [../feature_list.md](../feature_list.md) と [../unique_features.md](../unique_features.md) を基準に、現行 Tauri 実装でまだ不足している機能を整理した差分一覧です。
 
@@ -53,6 +53,13 @@
 - [x] **M-C08** diff overlay (Shift+M、モザイク適用領域をマゼンタ半透明で可視化) (2026-04-17)
 - [x] **M-C09** UI 言語切替 (ja / en) ヘッダートグル + localStorage (2026-04-17)
 - [x] **M-C10** inspector 折りたたみ状態の localStorage 永続化 (2026-04-17)
+- [x] **M-D05** detect tuning 設定の永続化 (load/save-detect-settings + frontend debounce save) (2026-04-17)
+- [x] **M-B03** export 詳細設定 (fps_mode / bitrate_mode / audio_mode 5 値 / video_codec / container) (2026-04-17)
+- [x] **M-D03** 導入済みモデル管理 (list-installed-models / delete-installed-model + UI パネル) (2026-04-17)
+- [x] **feature_list 6-6** トラック複製 (`duplicate-track` CLI + UI) (2026-04-17)
+- [x] **feature_list 6-7** トラック分割 (`split-track` CLI + UI、segment トリム対応) (2026-04-17)
+- [x] **feature_list 4-5** Shift+Home/End で選択トラック開始/終了へジャンプ (2026-04-17)
+- [x] **feature_list 4-6** ↑/↓ で前/次キーフレームへ移動 (既存 [/] の alias として追加) (2026-04-17)
 
 **Phase D (Editing UX Completion) は全 10 項目達成**。目視レビュー待ち。
 
@@ -75,7 +82,7 @@
 | --- | --- | --- | --- | --- | --- |
 | ~~M-B01~~ | `feature_list` 14-1/14-2, `unique_features` 13 | done | 複数 export job の逐次実行 | 2026-04-17 (5th): `user-data/export-queue/queue.json` 1 本に atomic write。frontend は useEffect drive loop で `queued` を順次 `running → completed/failed` へ遷移 | B |
 | ~~M-B02~~ | `feature_list` 14-2, `unique_features` 13 | done | export queue の永続化と再起動時の `interrupted` 復元 | 2026-04-17 (5th): `list-export-queue` 呼び出し時に `running` を `interrupted` に自動変換し、UI に `再実行` ボタンで requeue | B |
-| M-B03 | `feature_list` 13-3/13-4/13-5/13-6/13-7 | partial | export 設定を仕様書レベルまで広げる | 現状は `resolution` `mosaic_strength` `audio_mode` `bitrate_kbps` `encoder` のみ (codec / container / FPS / quality 未対応) | B |
+| ~~M-B03~~ | `feature_list` 13-3/13-4/13-5/13-6/13-7 | done | export 設定を仕様書レベルまで広げる | 2026-04-17: `fps_mode` / `bitrate_mode` / audio_mode 5 値 / `video_codec` (h264/vp9) / `container` (auto/mp4/mov/webm) を実装。VP9 は libvpx-vp9 経由、webm は libopus 音声。codec/container 互換性は `_resolve_codec_container` で command 層から validation | B |
 | ~~M-B04~~ | `feature_list` 13-9 | done | user-defined export preset の保存 / 再利用 / 削除 | 2026-04-17 (6th): `list-export-presets` / `save-export-preset` / `delete-export-preset` を実装、`user-data/presets/{name}.json` に 1 ファイル 1 preset。ExportSettingsModal にセレクタ + 保存 / 削除導線 | B |
 | ~~M-B05~~ | `feature_list` 14-1 | done | queue UI と recent export results の整理 | 2026-04-17 (5th): Job Panel の下に `.nle-export-queue` セクションを追加。state 別色分け + 削除 / 再実行 / 終了項目一括クリア | B |
 
@@ -100,9 +107,9 @@
 | --- | --- | --- | --- | --- | --- |
 | M-D01 | `unimplemented-features`, `feature_list` 11 | missing | GPU/CPU 実測に基づく detect 速度最適化 | CUDA が使えても CPU より遅く見えるケースの調査未着手 | E |
 | M-D02 | `unique_features` 4 | missing | contour follow (optical flow) | current implementation / frontend とも未導入 | E |
-| M-D03 | `feature_list` 12-2 | partial | installed model 管理タブ | detector modal で状態確認はできるが、一覧管理や削除導線はない | E |
+| ~~M-D03~~ | `feature_list` 12-2 | done | installed model 管理タブ | 2026-04-17: `list-installed-models` / `delete-installed-model` を追加 (path traversal 二重防御)、右アサイドに「導入済みモデル」パネル (サイズ / status / source / 削除ボタン) を追加 | E |
 | M-D04 | `feature_list` 11-1, `unique_features` 10 | deferred | YOLO / SSD 系まで含めた detector backend breadth | 現行 Tauri は NSFW-first の detector set に絞っている | E |
-| M-D05 | `unique_features` 9 | partial | detect device / tuning 設定の永続化 | doctor から初期値は出すが、session 間の保存はない | E |
+| ~~M-D05~~ | `unique_features` 9 | done | detect device / tuning 設定の永続化 | 2026-04-17: `load-detect-settings` / `save-detect-settings` を追加、`user-data/config/detect-settings.json` に単一オブジェクト保存。frontend は mount 時 load、state 変化時 debounce save。永続化された設定は doctor 既定値より優先 | E |
 
 ### E. QA / data / distribution
 

@@ -36,6 +36,8 @@ __pycache__/
 *.pyo
 *.egg-info/
 .pytest_cache/
+.pytest_tmp/
+**/.pytest_tmp/
 .pytest-tmp/
 .tmp-pytest-*/
 .venv/
@@ -72,6 +74,7 @@ tools/ffmpeg/bin/ffprobe
 # ---- User data / scratch ----
 user-data/
 apps/user-data/
+.tmp/
 
 # ---- Media (テスト動画含む) ----
 *.mp4

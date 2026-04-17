@@ -35,6 +35,9 @@ def run(_payload: dict) -> dict:
                     "project": data.get("project"),
                     "read_model": data.get("read_model"),
                     "timestamp": data.get("timestamp") or "",
+                    "current_frame": data.get("current_frame"),
+                    "selected_track_id": data.get("selected_track_id"),
+                    "selected_keyframe_frame": data.get("selected_keyframe_frame"),
                     "confirmed_danger_frames": confirmed_list,
                     "path": str(entry),
                 }

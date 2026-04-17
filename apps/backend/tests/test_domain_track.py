@@ -97,6 +97,24 @@ class TestRenderSegments:
         assert track.frame_is_renderable(3)
         assert track.frame_is_renderable(6)
 
+    def test_predicted_segments_do_not_hide_detector_keyframe_span(self):
+        track = MaskTrack(
+            track_id="t1",
+            label="detector",
+            state="detected",
+            source="detector",
+            keyframes=[_kf(0, "detector"), _kf(6, "detector")],
+            segments=[MaskSegment(start_frame=7, end_frame=10, state="predicted")],
+        )
+
+        segs = track.render_segments()
+
+        assert any(seg.start_frame == 0 and seg.end_frame == 6 and seg.state == "detected" for seg in segs)
+        assert any(seg.start_frame == 7 and seg.end_frame == 10 and seg.state == "predicted" for seg in segs)
+        assert track.frame_is_renderable(0)
+        assert track.frame_is_renderable(6)
+        assert track.frame_is_renderable(9)
+
 
 # ---------------------------------------------------------------------------
 # frame_is_renderable

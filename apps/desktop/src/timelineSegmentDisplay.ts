@@ -44,6 +44,15 @@ export function kfMarkerClassFull(
       return "nle-tl-row__marker--interpolated";
     case "predicted":
       return "nle-tl-row__marker--predicted";
+    case "re-detected":
+    case "re_detected":
+      return "nle-tl-row__marker--re-detected";
+    case "contour_follow":
+    case "contour-follow":
+      return "nle-tl-row__marker--contour-follow";
+    // "anchor_fallback" is spec-defined but visually folded into auto-anchored.
+    case "anchor_fallback":
+      return "nle-tl-row__marker--auto-anchored";
     default:
       return "";
   }

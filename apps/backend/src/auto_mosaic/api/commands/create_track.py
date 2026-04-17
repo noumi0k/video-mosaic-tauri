@@ -16,7 +16,7 @@ def run(payload: dict) -> dict:
     if error:
         return error
     assert project is not None
-    assert path is not None
+    # path may be None for unsaved (inline) projects; persist_project handles that.
 
     shape_type = str(payload.get("shape_type", "ellipse"))
     if shape_type not in {"ellipse", "polygon"}:

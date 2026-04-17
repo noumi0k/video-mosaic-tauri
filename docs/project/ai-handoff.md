@@ -3,7 +3,15 @@
 > 位置づけ: このファイルは直近作業の handoff log です。現行実装の正本は `docs/engineering/current-implementation.md`、実装済み / 未実装 backlog の正本は `docs/project/unimplemented-features.md` です。末尾の Next Logical Step は作成時点の履歴として扱い、現在の作業判断では正本を優先してください。
 
 ## Snapshot
-- **現状 (2026-04-17)**: Phase A (M-A01〜M-A04) と Phase D (M-C01〜M-C10) は完了。Phase B は core (M-B01 / M-B02 / M-B04 / M-B05) 完了で M-B03 (codec/container 詳細) のみ別パス送り。Phase C は M-E02 (backend) / M-E03 完了で M-E01 Tauri 実操作 E2E は別パス送り。目視レビュー待ち。
+- **現状 (2026-04-17 13th)**: 目視レビュー 3 周目の残件を継続中。`create-track` の inline project crash を塞ぎ、楕円ボタンは ellipse 近似 polygon を作るよう変更済み。続けて File メニューの `モデル管理...` モーダル、右ペインのエフェクト専用化、タイムラインのドラッグシーク、中央寄せ transport、F1 トグルを追加。
+- **現状 (2026-04-17 12th)**: 目視レビュー 2 周目の指摘 (F1 ヘルプが起動直後に反応しない / プロジェクト未オープン時に「保存済み」表示) を修正。F1 handler を project ガードの前に移動、status bar とプロジェクトパネルの状態表示を `!project` のとき「—」に。
+- **現状 (2026-04-17 11th)**: 目視レビュー 1 周目の指摘に対応。KF マーカー色を仕様準拠 (白=manual / 金=auto / 灰=predicted / 薄青=re-detected / 緑=contour_follow) に、Ctrl+Shift+R (In〜Out 範囲検出) / Ctrl+M (書き出し modal) を追加、`ensureEditableProjectPath` を廃止して全編集操作で in-memory inline project mutation に切り替え。`duplicate_track` / `split_track` / `save_project` の inline project 対応もセットで修正。
+- **現状 (2026-04-17 10th)**: Phase A / B / D 完全完了、Phase C backend 完了 (M-E01 別パス)。Phase E では M-D03 / M-D05 完了。この pass で M-B03 codec/container 完了 + **track duplicate / split** (feature_list 6-6, 6-7) + shortcut 拡張 (Shift+Home/End, ↑↓) を追加。
+- **Phase B: M-B03 完全 (2026-04-17 10th)**: video_codec (h264/vp9) + container (auto/mp4/mov/webm) を実装。VP9 は libvpx-vp9、webm は libopus 音声。`_resolve_codec_container` で command 層から互換性 validation。
+- **編集 UX 補完 (2026-04-17 10th)**: `duplicate-track` / `split-track` CLI を追加し、frontend の旧 client-side 実装を backend 経由へ置換。Shift+Home/End で track 開始/終了、↑/↓ で prev/next keyframe (既存 [/] alias)。
+- **Phase B: M-B03 partial 拡張 (2026-04-17 9th)**: `fps_mode` (source/custom) / `bitrate_mode` (auto/manual/target_size) / `audio_mode` を 5 値 (`copy_if_possible` / `encode` / `none` 追加) に拡張。残: video_codec (h264/vp9) + container (mp4/mov/webm)。
+- **Phase E: M-D03 (2026-04-17 9th)**: `list-installed-models` / `delete-installed-model` CLI + 右アサイド「導入済みモデル」パネル。path traversal は `^[A-Za-z0-9._\-]+$` と `resolve().relative_to(model_dir)` で二重防御。
+- **Phase E: M-D05 (2026-04-17 8th)**: detect 設定を `user-data/config/detect-settings.json` に永続化。`load-detect-settings` / `save-detect-settings` を追加、frontend は mount 時 load + 800ms debounce save。
 - **Phase C (部分完了, 2026-04-17 7th)**: export multi-frame verification (M-E03) と recovery restart 再現テスト (M-E02 backend) を追加。M-E01 Tauri 実操作 E2E は別パス。
 - **Phase B: M-B04 preset 追加 (2026-04-17 6th)**: user-defined preset の save / list / delete + UI。M-B03 (codec/container 詳細) は別パス。
 - **Phase B core 完了 (2026-04-17 5th pass)**: export queue の file-backed 実装、frontend drive loop、queue UI を追加。
@@ -31,6 +39,226 @@
   - `python -m pytest tests/test_domain_track.py -k "held_segments_do_not_hide_detector_keyframe_span"` passed
   - `python -m pytest tests/test_mask_continuity.py -k "held_segment_does_not_hide_accepted_detector_keyframes"` passed
 - Current desktop build status on April 16, 2026: `npm.cmd run build` in `apps/desktop` passed.
+
+## What Was Added In This Pass (April 17, 2026 13th — 目視レビュー 3 周目の UI 再編)
+
+### スコープ
+3 周目レビューで出た編集 UI 再編のうち、モデル管理のモーダル化、右ペイン整理、transport 再配置、タイムライン drag seek、F1 トグル、`create-track` inline 回帰テストを追加。
+
+### Frontend
+- `apps/desktop/src/components/ModelManagerModal.tsx` を新規追加。File メニューから開くモデル管理モーダルに、環境情報 / カタログモデル / 導入済みモデルを集約。
+- `App.tsx`
+  - File メニューに `モデル管理...` を追加。
+  - 左ペインのモデル 2 セクションを描画から外し、右ペインは Track Detail / Keyframe Detail だけ残す構成に変更。
+  - F1 を `setShortcutModalOpen((value) => !value)` にして再押下で閉じるよう修正。
+  - transport を中央寄せグループ + 右端 time 表示の構造へ変更。
+- `TimelineView.tsx`: ルーラー / レーンの `mousedown` から `window.mousemove` / `mouseup` を使う drag seek を追加。
+- `styles.css`: transport 縮小、モーダル基礎スタイル、ModelManagerModal のレイアウトを追加。
+
+### Backend / tests
+- `apps/backend/tests/test_cli_smoke.py`: `test_create_track_accepts_inline_project_when_unsaved` を追加。
+
+### Docs / rules
+- `current-implementation.md`: 「手動作成マスクの内部表現は polygon を正本にする」ルールを追記。
+
+### Verification
+- `apps/backend/tests/test_cli_smoke.py -k "create_track_accepts_inline_project_when_unsaved"` を追加対象として実行予定。
+- desktop build は本 pass の変更後に再確認が必要。
+
+## What Was Added In This Pass (April 17, 2026 12th — 目視レビュー 2 周目の修正)
+
+### スコープ
+tauri dev で `r01_startup.png` と `r02_f1help.png` が同一画像 = F1 で何も起きなかったことを確認。起動直後の状態表示の誤り (status bar の「保存済み」) も同時に修正。
+
+### B7: F1 が project 未オープン時に無反応
+- **原因**: `App.tsx` の keydown handler で `if (!project) return;` のガードより後段に F1 ハンドラが置かれていた。起動直後は project=null のため F1 が到達しなかった。
+- **修正**: F1 ハンドラをガードの前 (Ctrl+Shift+S の直後) に移動。F1 はプロジェクト有無にかかわらず常にヘルプモーダルを開く。
+
+### B8: project 未オープン時の「保存済み」表示
+- **原因**: `projectDirty ? dirty : saved` の三項演算が project=null を考慮していなかった。
+- **修正**: 
+  - `App.tsx:2221` (プロジェクトパネル): `!project ? "—" : projectDirty ? dirty : saved`
+  - `App.tsx:2821` (status bar): 同上
+
+### 検証
+- `npm.cmd run build` in `apps/desktop` → passed
+- `npm.cmd run check:mojibake` → passed
+- `py -3.12 -m pytest tests/test_cli_smoke.py -k "inline_project or inline_save or duplicate_track or split_track"` → 9 passed
+
+### 目視レビューに戻す項目
+- 起動直後 (動画未ロード) で F1 → ヘルプモーダルが開く
+- 起動直後の status bar / プロジェクトパネルが「—」表示 (「保存済み」と出ない)
+
+---
+
+## What Was Added In This Pass (April 17, 2026 11th — 目視レビュー 1 周目の修正)
+
+### スコープ
+tauri dev ビルド + test22.mp4 での目視テスト (`docs/review/review-checklist.md` に記録) で見つかった 5 件を修正。
+
+### B1/B2: KF マーカー色を仕様準拠に
+- `apps/desktop/src/styles.css`: `.nle-tl-row__marker--manual` を amber→白 (`#FFFFFF` + 黒いリング)、`.nle-tl-row__marker--auto` を green→金 (`#F5C518`) に変更。`--predicted` (`#9CA3AF`) / `--re-detected` (`#60A5FA`) / 新規 `--contour-follow` (`#22C55E`) を追加。
+- `apps/desktop/src/timelineSegmentDisplay.ts`: `kfMarkerClassFull()` の switch に `re-detected` / `re_detected` / `contour_follow` / `contour-follow` / `anchor_fallback` の case を追加。
+- `apps/desktop/src/components/TimelineView.tsx`: legend に「予測 / 再検出 / 追従」を追加。styles にも対応 class。
+
+### B3/B4: Ctrl+Shift+R / Ctrl+M ショートカット
+- `App.tsx` keydown handler に 2 本追加。`Ctrl+Shift+R` → `handleDetect()` (I/O marker を使った範囲検出)、`Ctrl+M` → `handleExportClick()` (書き出し modal)。
+- `ShortcutHelpModal.tsx` に「検出 / 書き出し」カテゴリを新設、3 項目 (Ctrl+Shift+D / Ctrl+Shift+R / Ctrl+M) を掲載。
+
+### B5: save dialog scope restriction (`feedback_save_dialog_scope.md`)
+- `App.tsx`: `ensureEditableProjectPath()` を全廃止し、代わりに `projectRefForMutation()` が `project.project_path` の有無で `{ project_path }` または `{ project }` を返す方式に。
+- 以下のハンドラを全て `projectRefForMutation()` 経由に改修: `handleCreateTrack` / `handleDeleteTrack` / `handleDuplicateTrack` / `handleSplitTrack` / `handleToggleTrackVisible` / `handleToggleTrackExportEnabled` / `handleMoveSelectedKeyframe` / `handleCreateKeyframe` / `handleDuplicateKeyframe` / `handleDeleteKeyframe`。
+- `apps/desktop/src/manualTrackFactory.ts`: `buildCreateTrackPayload` が `projectPath: null` + `project` を受け取れるように拡張。
+- `runExportWithSettings` は project_path 未設定時に save dialog を開かず、エラーメッセージ「プロジェクトを保存してから書き出してください (Ctrl+S)。」のみ返す (export queue は file-backed のため)。
+
+### B5 関連の backend 修正 (bridge-ui-reviewer が検出)
+- `apps/backend/src/auto_mosaic/api/commands/duplicate_track.py`: `assert path is not None` を削除 (inline mode で crash していた)。
+- `apps/backend/src/auto_mosaic/api/commands/split_track.py`: 同上。
+- `apps/backend/src/auto_mosaic/api/commands/save_project.py`: `project_path` が無い場合は atomic write をスキップする inline モードに拡張。response を `MutationCommandData` 形式に揃えるため `selection: {track_id: null, frame_index: null}` / `persisted_path: null` / `bytes_written: null` を追加。
+
+### テスト追加 (3 件)
+- `test_duplicate_track_accepts_inline_project_when_unsaved`
+- `test_split_track_accepts_inline_project_when_unsaved`
+- `test_save_project_accepts_inline_project_without_path`
+
+### 検証
+- `py -3.12 -m pytest tests/test_cli_smoke.py -k "inline_project or inline_save or duplicate_track or split_track or save_project" -q` → 10 passed
+- `npm.cmd run build` in `apps/desktop` → passed
+- `npm.cmd run check:mojibake` → passed
+
+### 目視レビューに戻す項目
+- 未保存プロジェクトで `N` キーなどから track 作成 → save dialog が**開かない**ことを確認
+- Ctrl+Shift+R で範囲検出、Ctrl+M で書き出し modal が開くことを確認
+- タイムライン KF 色が白 (manual) / 金 (auto) で表示されることを確認
+- 凡例に「予測 / 再検出 / 追従」が追加されていることを確認
+
+---
+
+## What Was Added In This Pass (April 17, 2026 10th — M-B03 完全 + track duplicate/split + shortcut 拡張)
+
+### スコープ
+編集ソフトの残機能を埋める pass。M-B03 の VP9/webm 経路、feature_list 6-6 / 6-7 のトラック複製・分割、未実装ショートカット 2 件。
+
+### Backend
+- `apps/backend/src/auto_mosaic/infra/video/export.py`
+  - `_build_encoder_cmd_fragment` に `video_codec` 引数追加。`vp9` のとき `-c:v libvpx-vp9 -deadline good -cpu-used 2 -pix_fmt yuv420p`。GPU 指定時は警告のみ付与。
+  - `_CODEC_CONTAINER_MATRIX` と `_resolve_codec_container(video_codec, container, output_suffix)` を追加。h264+mp4/mov と vp9+webm のみ許容、それ以外は `ValueError`。音声 codec は mp4/mov→aac / webm→libopus。
+  - `_ffmpeg_pipe_export` に `video_codec` / `audio_codec` を渡し、audio は container 依存。
+  - `export_project_video` の signature に `video_codec` / `container` を追加。先頭で `_resolve_codec_container` を呼び、失敗時は `EXPORT_CODEC_CONTAINER_INVALID` で即 return。response に `video_codec` / `container` を含める。
+- `apps/backend/src/auto_mosaic/api/commands/export_video.py`: VALID_VIDEO_CODECS / VALID_CONTAINERS 追加、組み合わせ validation を command 層で前倒し (project に video が無くても codec 不整合を返す)。
+- 新規 `duplicate_track.py`: 選択 track を deepcopy + 新 `track-<uuid4>` で複製。`user_edited=True` / `user_locked=False`。
+- 新規 `split_track.py`: `split_frame` 境界で keyframes と segments を分配 (straddle segment はトリム)。左右どちらかが空なら `SPLIT_EMPTY_SIDE`。
+- `cli_main.py` に 2 コマンド登録。
+
+### Frontend
+- `apps/desktop/src/components/ExportSettingsModal.tsx`: `video_codec` / `container` セレクタ追加。codec 変更時にコンテナを自動追従 (vp9→webm、h264→mp4/mov)。
+- `apps/desktop/src/types.ts`: `ExportVideoCodec` / `ExportContainer` 型追加、`ExportOptions` を拡張。
+- `apps/desktop/src/App.tsx`
+  - export enqueue / queue run の options に `video_codec` / `container` を伝搬。
+  - `handleDuplicateTrack` / `handleSplitTrack` を client-side mutation から backend 経由 (`duplicate-track` / `split-track`) へ置換。
+  - keydown handler: `Shift+Home/End` で `selectedTrack.start_frame/end_frame` へ、`ArrowUp/Down` を `[/]` の alias として追加。
+- `apps/desktop/src/components/ShortcutHelpModal.tsx`: 「Shift+Home / Shift+End」と「↑/↓」を表へ追加。
+
+### テスト
+- `tests/test_cli_smoke.py` に 7 件追加:
+  - M-B03 codec/container: `test_export_video_rejects_invalid_video_codec` / `_rejects_invalid_container` / `_rejects_incompatible_codec_container`
+  - track: `test_duplicate_track_copies_keyframes_with_new_id` / `test_duplicate_track_returns_track_not_found_for_missing_id` / `test_split_track_partitions_keyframes_at_frame` / `test_split_track_rejects_empty_side`
+
+### 検証
+- `py -3.12 -m pytest tests/test_cli_smoke.py -k "export_video_rejects or duplicate_track or split_track or export_video_accepts_spec or export_video_target_size" -q` → 14 passed
+- `npm.cmd run build` in `apps/desktop` → passed
+- `npm.cmd run check:mojibake` → passed
+
+### 残り
+- **M-D01** detect 性能チューニング (empirical 測定が必要)、**M-D02** contour follow (Optical Flow service)、**M-E01** Tauri E2E、**M-E04/E05/E06** teacher dataset / retraining / installer は未着手 (編集ソフトとしての必須機能ではないため目視レビュー後に判断)。
+
+---
+
+## What Was Added In This Pass (April 17, 2026 9th — Phase B: M-B03 partial 拡張 + Phase E: M-D03 installed model 管理)
+
+### スコープ
+編集ソフトとして「仕様書に記載された書き出し設定の大半」と「ローカルに導入したモデルファイルの一覧管理」を埋める。VP9 / webm の codec 分岐は影響範囲が大きいため次パスへ分離。
+
+### Backend — M-B03 (partial)
+- `apps/backend/src/auto_mosaic/infra/video/export.py`
+  - `export_project_video` に `fps_mode` / `fps_custom` / `bitrate_mode` / `target_size_mb` を追加 (keyword-only)。
+  - `_ffmpeg_pipe_export` に `output_fps` を追加。`fps != output_fps` のときのみ `-r <output_fps>` をエンコーダ args 直後に挿入 (入力側 `-r <fps>` との対で出力 fps を書き換える)。
+  - `audio_mode` に 3 分岐追加: `copy_if_possible` → `-c:a copy -shortest`、`encode` → `-c:a aac -b:a 192k -shortest`、既定の `mux_if_possible` は従来通り `-c:a aac`。`has_audio` 判定で出力 status を `muxed` に設定。
+  - OpenCV fallback の `VideoWriter` fps も `output_fps` を使用。response に `bitrate_mode` / `fps_mode` / `source_fps` を追加。
+  - target_size は `kbps = mb * 8192 / duration_sec` で算出し下限 200 kbps を保証。
+- `apps/backend/src/auto_mosaic/api/commands/export_video.py`
+  - VALID_AUDIO_MODES を 5 値に拡張、`none` → `video_only` に正規化。
+  - `fps_mode` / `fps_custom` の validation (範囲 0<x≤240、custom 時必須)。
+  - `bitrate_mode` / `target_size_mb` / `bitrate_kbps` の依存 validation。
+
+### Backend — M-D03
+- `apps/backend/src/auto_mosaic/api/commands/_installed_models.py` 新規: `list_installed` / `delete_installed` ヘルパー。
+- thin wrapper 2 本 (`list_installed_models.py` / `delete_installed_model.py`) + `cli_main.py` に登録。
+- `list_installed` は model_dir 直下の `.onnx` / `.pt` を走査し、`doctor._check_model_file` と `get_model_spec_map` で integrity と catalog 一致を判定。未登録ファイルは `known: false`。
+- `delete_installed` は 3 段防御: (1) `^[A-Za-z0-9._\-]+$`、(2) `".." in name` / leading-dot 明示拒否、(3) `target.resolve().relative_to(model_dir.resolve())`。存在しないファイルは `deleted: false` を返す冪等操作。
+
+### Frontend
+- `apps/desktop/src/types.ts`: `ExportOptions` に `resolution` / `encoder` / `fps_mode` / `fps_custom` / `bitrate_mode` / `target_size_mb` / `bitrate_kbps` をすべて optional で追加。`ExportAudioMode` を 5 値ユニオンに拡張。
+- `apps/desktop/src/components/ExportSettingsModal.tsx`
+  - `ExportSettings` に M-B03 フィールド追加。
+  - 新規 UI: FPS セレクタ (source/custom + 数値入力)、ビットレート 3 mode + 条件付き入力、音声 4 options。
+- `apps/desktop/src/App.tsx`
+  - `InstalledModelEntry` 型、`installedModels` / `installedModelDir` state、`reloadInstalledModels` / `handleDeleteInstalledModel` fn。
+  - 起動 effect で load、右アサイドに「導入済みモデル」パネルを追加 (ファイル名 / サイズ MB / status 色分け / source_label / 削除ボタン + 再読み込みアイコン)。
+  - export enqueue / queue drive loop の `options` を 8 フィールドに拡張。
+
+### テスト
+- `tests/test_cli_smoke.py` に 9 件追加:
+  - M-B03: `test_export_video_rejects_custom_fps_without_value` / `_rejects_fps_custom_out_of_range` / `_rejects_target_size_without_value` / `_rejects_manual_bitrate_without_value` / `_accepts_spec_audio_aliases` / `_target_size_computes_bitrate_from_duration`
+  - M-D03: `test_list_installed_models_reports_onnx_files` / `test_delete_installed_model_rejects_path_traversal` / `test_delete_installed_model_removes_existing_file`
+
+### 検証
+- `py -3.12 -m pytest tests/test_cli_smoke.py -k "detect_settings or installed_model or export_video_rejects or export_video_accepts_spec or export_video_target_size" -q` → 14 passed
+- `npm.cmd run build` in `apps/desktop` → passed
+- `npm.cmd run check:mojibake` → passed
+- invariant-auditor → PASS (10/10 項目)
+
+### 残り
+- **M-B03 残り**: video_codec (h264/vp9) と container (mp4/mov/webm)。libvpx-vp9 encoder chain + webm 時の audio codec opus 分岐が必要。
+- **M-D01** detect 性能チューニング (empirical 測定が必要)、**M-D02** contour follow (Optical Flow service)、**M-E01** Tauri E2E、**M-E04/E05/E06** teacher dataset / retraining / installer は未着手。
+
+---
+
+## What Was Added In This Pass (April 17, 2026 8th — Phase E: M-D05 detect settings persistence)
+
+### スコープ
+Phase E 入り口として M-D05 (detect device / tuning 設定の永続化) を実装。session 毎に detect 設定を入力し直す手間を取り除く。
+
+### Backend
+- `apps/backend/src/auto_mosaic/api/commands/_detect_settings.py` 新規: `load_settings` / `save_settings` ヘルパー。型の coercion のみ行い、enum 値の妥当性検証はフロントに任せる。未知フィールドは silent drop。
+- `load_detect_settings.py` / `save_detect_settings.py` 新規 (thin wrapper)、`cli_main.py` に登録。
+- 保存先: `user-data/config/detect-settings.json` (単一オブジェクト JSON、atomic write)。既存 `config_dir` を再利用し `RuntimeDirs` は変更なし。
+- 壊れた JSON は `load-detect-settings` が `{"settings": null, "broken": true}` として success で返す (UI がフォールバック可能)。
+
+### Frontend — App.tsx
+- `detectSettingsLoadedRef` / `detectSettingsSaveTimerRef` を追加。
+- mount effect で `reloadDetectSettings()` を呼び出し、取得値で 11 項目 (`backend` / `device` / `confidence_threshold` / `sample_every` / `max_samples` / `inference_resolution` / `batch_size` / `contour_mode` / `precise_face_contour` / `vram_saving_mode` / `selected_categories`) の state を hydrate。
+- 永続化された設定が存在する場合は `detectDefaultsAppliedRef.current = true` として doctor ベースの既定値 (CUDA/DirectML 分岐) を抑止。
+- detect 関連 state が変化すると 800ms debounce で `save-detect-settings` を呼び出す。初回 hydration 前は save をスキップ。
+
+### テスト
+- `tests/test_cli_smoke.py` に 4 件追加:
+  - `test_detect_settings_save_load_roundtrip`
+  - `test_detect_settings_save_rejects_non_object_payload` (`DETECT_SETTINGS_REQUIRED`)
+  - `test_detect_settings_load_reports_broken_file`
+  - `test_detect_settings_coerces_unexpected_field_shapes` (string→confidence 不可、bool→int 不可、float.is_integer()→int OK、List の非 str 要素を drop)
+
+### 検証
+- `py -3.12 -m pytest tests/test_cli_smoke.py -k "detect_settings" -q --basetemp=.pytest_tmp` → 4 passed
+- `py -3.12 -m pytest tests/test_cli_smoke.py -k "detect_settings or recovery_snapshot or export_queue or export_preset" -q` → 10 passed (既存回帰なし)
+- `npm.cmd run build` in `apps/desktop` → passed
+- `npm.cmd run check:mojibake` → passed
+
+### 未検証 / 残り
+- Tauri ウィンドウでの目視確認 (DetectorSettingsModal を開き閉じ → 再起動 → 同じ設定が復元されること)
+- M-B03 (codec/container 詳細), M-E01 (Tauri E2E), M-D01 (検出速度チューニング), M-D02 (contour follow), M-D03 (installed model management), M-E04/E05 (teacher dataset / retraining), M-E06 (installer) は未着手
+
+---
 
 ## What Was Added In This Pass (April 17, 2026 7th — Phase C: export & recovery verification)
 

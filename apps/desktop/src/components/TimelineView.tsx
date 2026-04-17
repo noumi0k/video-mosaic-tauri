@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { MaskTrack, ProjectReadModel } from "../types";
 import type { DangerousFrame } from "../dangerousFrames";
 import { segmentBarClass, kfMarkerClassFull } from "../timelineSegmentDisplay";
@@ -24,6 +24,7 @@ type TimelineViewProps = {
 
 const ZOOM_STEPS = [1, 1.5, 2, 3, 5, 8, 12, 20];
 const LABEL_COL_W = 140;
+type DragTarget = { kind: "ruler" } | { kind: "lane"; trackId: string } | null;
 
 function snapZoom(z: number, dir: 1 | -1): number {
   if (dir === 1) {
@@ -65,6 +66,7 @@ export function TimelineView({
   onSeekFrame,
 }: TimelineViewProps) {
   const [zoom, setZoom] = useState(1);
+  const [dragTarget, setDragTarget] = useState<DragTarget>(null);
   const bodyRef = useRef<HTMLDivElement>(null);
   const rulerScrollRef = useRef<HTMLDivElement>(null);
 
@@ -101,16 +103,64 @@ export function TimelineView({
     onSeekFrame(pctToFrame(xInContent / (el.scrollWidth || 1)));
   }
 
-  function handleLaneClick(e: React.MouseEvent<HTMLDivElement>, trackId: string) {
-    e.stopPropagation();
+  function seekFromRulerClientX(clientX: number) {
+    const el = rulerScrollRef.current;
+    if (!el) return;
+    const rect = el.getBoundingClientRect();
+    const xInVisible = clientX - rect.left;
+    const xInContent = xInVisible + el.scrollLeft;
+    onSeekFrame(pctToFrame(xInContent / (el.scrollWidth || 1)));
+  }
+
+  function seekFromLaneClientX(trackId: string, clientX: number) {
     const bodyEl = bodyRef.current;
     if (!bodyEl) return;
     const rect = bodyEl.getBoundingClientRect();
-    const xInContent = e.clientX - rect.left + bodyEl.scrollLeft - LABEL_COL_W;
+    const xInContent = clientX - rect.left + bodyEl.scrollLeft - LABEL_COL_W;
     const laneWidth = bodyEl.scrollWidth - LABEL_COL_W;
     onSelectTrack(trackId);
     onSeekFrame(pctToFrame(xInContent / Math.max(laneWidth, 1)));
   }
+
+  function handleRulerMouseDown(e: React.MouseEvent<HTMLDivElement>) {
+    setDragTarget({ kind: "ruler" });
+    handleRulerClick(e);
+  }
+
+  function handleLaneClick(e: React.MouseEvent<HTMLDivElement>, trackId: string) {
+    e.stopPropagation();
+    seekFromLaneClientX(trackId, e.clientX);
+  }
+
+  function handleLaneMouseDown(e: React.MouseEvent<HTMLDivElement>, trackId: string) {
+    e.stopPropagation();
+    setDragTarget({ kind: "lane", trackId });
+    seekFromLaneClientX(trackId, e.clientX);
+  }
+
+  useEffect(() => {
+    if (!dragTarget) return;
+    const currentDragTarget = dragTarget;
+
+    function onMove(event: MouseEvent) {
+      if (currentDragTarget.kind === "ruler") {
+        seekFromRulerClientX(event.clientX);
+        return;
+      }
+      seekFromLaneClientX(currentDragTarget.trackId, event.clientX);
+    }
+
+    function onUp() {
+      setDragTarget(null);
+    }
+
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+    return () => {
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+    };
+  }, [dragTarget]);
 
   const ticks = generateTicks(totalFrames);
   const playheadPct = framePct(currentFrame);
@@ -179,6 +229,7 @@ export function TimelineView({
           className="nle-tlv__ruler-scroll"
           ref={rulerScrollRef}
           onClick={handleRulerClick}
+          onMouseDown={handleRulerMouseDown}
         >
           <div className="nle-tlv__zoom-inner" style={{ width: `${zoom * 100}%` }}>
             <div className="nle-tlv__ruler-area">
@@ -290,6 +341,7 @@ export function TimelineView({
                   <div
                     className="nle-tl-row__lane"
                     onClick={(e) => handleLaneClick(e, track.track_id)}
+                    onMouseDown={(e) => handleLaneMouseDown(e, track.track_id)}
                   >
                     {(() => {
                       const trackDoc = tracksMap.get(track.track_id);
@@ -365,6 +417,9 @@ export function TimelineView({
         <span className="nle-tl-legend__item nle-tl-legend__item--manual">手動</span>
         <span className="nle-tl-legend__item nle-tl-legend__item--auto">自動</span>
         <span className="nle-tl-legend__item nle-tl-legend__item--auto-anchored">anchored</span>
+        <span className="nle-tl-legend__item nle-tl-legend__item--predicted">予測</span>
+        <span className="nle-tl-legend__item nle-tl-legend__item--re-detected">再検出</span>
+        <span className="nle-tl-legend__item nle-tl-legend__item--contour-follow">追従</span>
         <span className="nle-tl-legend__separator">セグメント:</span>
         <span className="nle-tl-legend__item nle-tl-legend__item--seg-confirmed">確定</span>
         <span className="nle-tl-legend__item nle-tl-legend__item--seg-held">held</span>

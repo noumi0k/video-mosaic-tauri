@@ -12,11 +12,18 @@ Auto Mosaic のドキュメント入口です。
 
 まず人間向けの全体像を読むなら [human/product-spec.md](./human/product-spec.md)。
 実装作業に入るなら [engineering/current-implementation.md](./engineering/current-implementation.md) を正本として読みます。
-安定化フェーズ完了後の新規開発方針は [project/README.md](./project/README.md) を入口にし、PySide6 同等編集体験チェックリストを中核ロードマップとして扱います。
+安定化フェーズ完了後の新規開発方針は [project/README.md](./project/README.md) を入口にし、仕様書との差分一覧と phase ロードマップを中核資料として扱います。
 
 ---
 
 ## ドキュメント一覧
+
+### ルート仕様ドキュメント
+
+| ファイル | 内容 |
+|----------|------|
+| [feature_list.md](./feature_list.md) | 現在の製品仕様を機能単位で整理した一覧 |
+| [unique_features.md](./unique_features.md) | Auto Mosaic 固有の概念、アルゴリズム、状態設計 |
 
 ### [human/](./human/) — 人間向け仕様
 
@@ -45,8 +52,9 @@ Auto Mosaic のドキュメント入口です。
 | ファイル | 内容 |
 |----------|------|
 | [README.md](./project/README.md) | Project ドキュメントの入口。安定化後の開発中核資料への読み順 |
-| [unimplemented-features.md](./project/unimplemented-features.md) | 実装済み機能と未実装機能の一覧 |
-| [pyside6-editing-experience-parity-checklist.md](./project/pyside6-editing-experience-parity-checklist.md) | 安定化後の主ロードマップ。PySide6 同等編集体験の機能チェックリストと開発フェーズ票 |
+| [missing-feature-matrix.md](./project/missing-feature-matrix.md) | `feature_list.md` / `unique_features.md` に対する現行実装の不足差分一覧 |
+| [unimplemented-features.md](./project/unimplemented-features.md) | 不足機能をどの phase で実装するかを整理したロードマップ |
+| [pyside6-editing-experience-parity-checklist.md](./project/pyside6-editing-experience-parity-checklist.md) | PySide6 比較の checklist と過去フェーズ票 |
 | [pyside6-ui-structure-reference.md](./project/pyside6-ui-structure-reference.md) | PySide6 版 UI 構成、ボタン配置、メニュー構成の参照資料 |
 | [ai-handoff.md](./project/ai-handoff.md) | 直近作業の handoff log |
 | [pyside6-remaining-tasks.md](./project/pyside6-remaining-tasks.md) | PySide6 版との比較履歴 |

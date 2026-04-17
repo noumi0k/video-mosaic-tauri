@@ -1,6 +1,6 @@
 # 実装ロードマップ
 
-最終更新: 2026-04-17 (Phase A / B core / C core / D 完了)
+最終更新: 2026-04-17 (Phase A / B core / C core / D 完了 + Phase E: M-D05 完了)
 
 この文書は、[missing-feature-matrix.md](./missing-feature-matrix.md) を実装順に並べ替えたロードマップです。
 機能差分の正本は `missing-feature-matrix.md`、不変条件の正本は [../engineering/current-implementation.md](../engineering/current-implementation.md) を参照してください。
@@ -17,10 +17,10 @@
 | Phase | 目的 | 状態 |
 | --- | --- | --- |
 | A | Persistent workflow completion (recovery / review safety) | 完了 (M-A01〜M-A04) |
-| B | Export workflow completion (queue / preset) | 部分完了 (M-B01/B02/B04/B05 完了、M-B03 codec/container 詳細は別パス) |
+| B | Export workflow completion (queue / preset / 詳細設定) | 完了 (M-B01〜M-B05 全完) |
 | C | Regression & verification (Tauri E2E / output verify) | 部分完了 (M-E02 backend / M-E03 完了、M-E01 Tauri 実ウィンドウ E2E は別パス) |
 | **D** | **Editing UX completion (M-C01〜M-C10)** | **コード実装完了、目視レビュー待ち** |
-| E | AI / data / distribution | 未着手 |
+| E | AI / data / distribution | 部分着手 (M-D03 / M-D05 完了、M-B03 拡張、M-D01/M-D02/M-E04〜M-E06 未着手) |
 
 ### 達成済みチェックリスト
 
@@ -64,6 +64,12 @@
 - [x] **M-E02 (backend)** recovery end-to-end backend 検証 (Phase C / 2026-04-17)
   - `test_recovery_workflow_simulates_restart` で save → 再起動模擬 → restore → delete
 - [x] **M-E03** export output multi-frame ROI verification (Phase C / 2026-04-17)
+- [x] **M-D05** detect tuning / device 設定の永続化 (Phase E / 2026-04-17)
+  - `user-data/config/detect-settings.json` に単一オブジェクト保存、CLI `load-detect-settings` / `save-detect-settings`、frontend で mount 時 load + 変化時 debounce save
+- [x] **M-B03** export 詳細設定全実装 (Phase B / 2026-04-17)
+  - fps_mode (source/custom) / bitrate_mode (auto/manual/target_size) / audio_mode 5 値 / video_codec (h264/vp9) / container (auto/mp4/mov/webm)。VP9 は libvpx-vp9、webm は libopus 音声。command 層で互換性 validation
+- [x] **M-D03** 導入済みモデル管理 (Phase E / 2026-04-17)
+  - CLI `list-installed-models` / `delete-installed-model` (path traversal 二重防御)、UI は右アサイドの「導入済みモデル」パネル
   - 8 フレーム全てで ROI のピクセル差分を assert
 
 **Phase D (Editing UX Completion) は全 10 項目達成**、Phase A / B core / C core も完了。コード実装は完了しており、次は Tauri ウィンドウでの目視レビュー。別パス送り:

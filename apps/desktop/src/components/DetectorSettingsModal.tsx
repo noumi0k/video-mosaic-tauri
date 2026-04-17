@@ -3,8 +3,8 @@ import React from "react";
 import {
   buildDetectorOptionStatuses,
   DETECTOR_CATEGORIES,
-  isModelInstalled,
   isCategorySupportedByBackend,
+  isModelInstalled,
   unsupportedCategoryReason,
   type DetectorAvailability,
   type DetectorBackendKey,
@@ -22,6 +22,9 @@ type Props = {
   batchSize: number;
   contourMode: string;
   vramSavingMode: boolean;
+  overwriteManualTracks: boolean;
+  trackCount: number;
+  manualTrackCount: number;
   selectedCategories: DetectorCategoryKey[];
   availableModels: DetectorAvailability[];
   requiredModels: DetectorAvailability[];
@@ -43,6 +46,7 @@ type Props = {
   onBatchSizeChange: (value: number) => void;
   onContourModeChange: (value: string) => void;
   onVramSavingModeChange: (value: boolean) => void;
+  onOverwriteManualTracksChange: (value: boolean) => void;
   onToggleCategory: (value: DetectorCategoryKey) => void;
   onRun: () => void;
   onFetchRequired: () => void;
@@ -57,7 +61,8 @@ export function DetectorSettingsModal(props: Props) {
   }
 
   const detectorOptions = buildDetectorOptionStatuses(props.availableModels);
-  const selectedOption = detectorOptions.find((option) => option.key === props.selectedBackend) ?? detectorOptions[0];
+  const selectedOption =
+    detectorOptions.find((option) => option.key === props.selectedBackend) ?? detectorOptions[0];
   const missingRequiredCount = props.requiredModels.filter((item) => !isModelInstalled(item)).length;
   const missingOptionalCount = props.optionalModels.filter((item) => !isModelInstalled(item)).length;
 
@@ -69,23 +74,27 @@ export function DetectorSettingsModal(props: Props) {
 
         <div className="detect-modal__statusbar">
           <div className={`detect-modal__status-chip detect-modal__status-chip--${props.hasCuda ? "ready" : "warning"}`}>
-            {props.hasCuda ? "GPU 利用可能 (CUDA)" : "CPU fallback"}
+            {props.hasCuda ? "GPU 利用可能 (CUDA)" : props.hasDirectMl ? "GPU 利用可能 (DirectML)" : "CPU fallback"}
           </div>
           <div className={`detect-modal__status-chip detect-modal__status-chip--${missingRequiredCount === 0 ? "ready" : "warning"}`}>
             必須モデル: {missingRequiredCount === 0 ? "OK" : `${missingRequiredCount} 件不足`}
           </div>
           <div className={`detect-modal__status-chip detect-modal__status-chip--${missingOptionalCount === 0 ? "neutral" : "warning"}`}>
-            追加モデル: {missingOptionalCount === 0 ? "OK" : `${missingOptionalCount} 件未取得`}
+            任意モデル: {missingOptionalCount === 0 ? "OK" : `${missingOptionalCount} 件未導入`}
           </div>
           <div className={`detect-modal__status-chip detect-modal__status-chip--${props.hasSam2 ? "ready" : "warning"}`}>
-            SAM2: {props.hasSam2 ? "利用可能" : "未取得 / 破損"}
+            SAM2: {props.hasSam2 ? "利用可能" : "未導入 / フォールバック"}
           </div>
-          {props.onnxVersion ? <div className="detect-modal__status-chip detect-modal__status-chip--neutral">ONNX Runtime {props.onnxVersion}</div> : null}
+          {props.onnxVersion ? (
+            <div className="detect-modal__status-chip detect-modal__status-chip--neutral">
+              ONNX Runtime {props.onnxVersion}
+            </div>
+          ) : null}
         </div>
 
         <div className="detect-modal__section">
           <div className="detect-modal__section-header">
-            <span>実行デバイス</span>
+            <span>推論デバイス</span>
             <span className="detect-modal__section-note">GPU が使えない環境でも CPU で継続できます。</span>
           </div>
           <div className="detect-modal__device-grid">
@@ -95,7 +104,7 @@ export function DetectorSettingsModal(props: Props) {
               type="button"
             >
               <strong>自動</strong>
-              <span>{props.hasCuda ? "CUDA を優先して自動選択" : "CPU で実行"}</span>
+              <span>{props.hasCuda || props.hasDirectMl ? "利用可能な GPU を優先します" : "CPU で実行します"}</span>
             </button>
             <button
               className={`detect-modal__choice ${props.selectedDevice === "cuda" ? "detect-modal__choice--selected" : ""}`}
@@ -104,7 +113,7 @@ export function DetectorSettingsModal(props: Props) {
               type="button"
             >
               <strong>CUDA</strong>
-              <span>{props.hasCuda ? "GPU で推論" : "この環境では利用不可"}</span>
+              <span>{props.hasCuda ? "GPU で高速に推論します" : "この環境では利用できません"}</span>
             </button>
             <button
               className={`detect-modal__choice ${props.selectedDevice === "cpu" ? "detect-modal__choice--selected" : ""}`}
@@ -112,7 +121,7 @@ export function DetectorSettingsModal(props: Props) {
               type="button"
             >
               <strong>CPU</strong>
-              <span>安定優先で実行</span>
+              <span>互換性優先で実行します</span>
             </button>
           </div>
         </div>
@@ -120,7 +129,7 @@ export function DetectorSettingsModal(props: Props) {
         <div className="detect-modal__section">
           <div className="detect-modal__section-header">
             <span>検出モデル</span>
-            <span className="detect-modal__section-note">必須モデルと追加モデルを分けて表示します。</span>
+            <span className="detect-modal__section-note">必須モデルと任意モデルを分けて表示します。</span>
           </div>
           <div className="detect-modal__model-groups">
             <div className="detect-modal__model-group">
@@ -152,16 +161,16 @@ export function DetectorSettingsModal(props: Props) {
                   ? props.eraxState === "ready"
                     ? "利用可能"
                     : props.eraxState === "downloaded_pt"
-                    ? "PT 取得済み"
-                    : "未取得"
+                      ? "PT 導入済み"
+                      : "未導入"
                   : option.statusLabel;
                 const eraxStateClass = isErax
                   ? props.eraxState === "ready"
                     ? "ready"
                     : "warning"
                   : option.available
-                  ? "ready"
-                  : "warning";
+                    ? "ready"
+                    : "warning";
                 return (
                   <div key={option.key} className="detect-modal__model-card-wrap">
                     <button
@@ -192,12 +201,12 @@ export function DetectorSettingsModal(props: Props) {
                     {isErax && props.eraxState === "downloaded_pt" ? (
                       <>
                         {props.eraxConvertBusy ? (
-                          <p className="detect-modal__inline-note">ONNX 自動変換中…</p>
+                          <p className="detect-modal__inline-note">ONNX 自動変換中...</p>
                         ) : props.eraxConvertible ? (
-                          <p className="detect-modal__inline-note">ONNX 自動変換を準備中…</p>
+                          <p className="detect-modal__inline-note">ONNX 自動変換を準備中...</p>
                         ) : (
                           <p className="detect-modal__inline-note">
-                            ONNX 自動変換には ultralytics が必要です。<code>pip install ultralytics</code> を実行後、再チェックしてください。
+                            ONNX 自動変換には <code>ultralytics</code> が必要です。<code>pip install ultralytics</code> を導入後に再チェックしてください。
                           </p>
                         )}
                       </>
@@ -208,7 +217,9 @@ export function DetectorSettingsModal(props: Props) {
             </div>
           </div>
           {!selectedOption.available ? (
-            <p className="detect-modal__warn">選択中のモデルは未取得です。近くの「不足モデルを取得」から必須モデルを取得してください。</p>
+            <p className="detect-modal__warn">
+              選択中のモデルは未取得です。近くの「不足モデルを取得」から必須モデルを取得してください。
+            </p>
           ) : null}
         </div>
 
@@ -221,14 +232,30 @@ export function DetectorSettingsModal(props: Props) {
             <label className="detect-modal__param-card">
               <span>検出間隔</span>
               <div className="detect-modal__param-input">
-                <input type="number" min={1} max={30} value={props.sampleEvery} onChange={(event) => props.onSampleEveryChange(Math.max(1, Math.min(30, event.currentTarget.valueAsNumber || 1)))} />
+                <input
+                  type="number"
+                  min={1}
+                  max={30}
+                  value={props.sampleEvery}
+                  onChange={(event) =>
+                    props.onSampleEveryChange(Math.max(1, Math.min(30, event.currentTarget.valueAsNumber || 1)))
+                  }
+                />
                 <em>frame</em>
               </div>
             </label>
             <label className="detect-modal__param-card">
               <span>最大サンプル数</span>
               <div className="detect-modal__param-input">
-                <input type="number" min={10} max={9999} value={props.maxSamples} onChange={(event) => props.onMaxSamplesChange(Math.max(10, Math.min(9999, event.currentTarget.valueAsNumber || 120)))} />
+                <input
+                  type="number"
+                  min={10}
+                  max={9999}
+                  value={props.maxSamples}
+                  onChange={(event) =>
+                    props.onMaxSamplesChange(Math.max(10, Math.min(9999, event.currentTarget.valueAsNumber || 120)))
+                  }
+                />
                 <em>frames</em>
               </div>
             </label>
@@ -245,22 +272,57 @@ export function DetectorSettingsModal(props: Props) {
             <label className="detect-modal__param-card">
               <span>バッチサイズ</span>
               <div className="detect-modal__param-input">
-                <input type="number" min={1} max={16} value={props.batchSize} onChange={(event) => props.onBatchSizeChange(Math.max(1, Math.min(16, event.currentTarget.valueAsNumber || 1)))} />
+                <input
+                  type="number"
+                  min={1}
+                  max={16}
+                  value={props.batchSize}
+                  onChange={(event) =>
+                    props.onBatchSizeChange(Math.max(1, Math.min(16, event.currentTarget.valueAsNumber || 1)))
+                  }
+                />
                 <em>items</em>
               </div>
             </label>
             <label className="detect-modal__param-card detect-modal__param-card--wide">
-              <span>閾値</span>
+              <span>信頼度</span>
               <div className="detect-modal__threshold">
-                <input type="range" min={0.1} max={0.9} step={0.01} value={props.threshold} onChange={(event) => props.onThresholdChange(parseFloat(event.currentTarget.value))} />
+                <input
+                  type="range"
+                  min={0.1}
+                  max={0.9}
+                  step={0.01}
+                  value={props.threshold}
+                  onChange={(event) => props.onThresholdChange(parseFloat(event.currentTarget.value))}
+                />
                 <strong>{props.threshold.toFixed(2)}</strong>
               </div>
             </label>
             <label className="detect-modal__toggle-row">
-              <input type="checkbox" checked={props.vramSavingMode} onChange={(event) => props.onVramSavingModeChange(event.currentTarget.checked)} />
+              <input
+                type="checkbox"
+                checked={props.vramSavingMode}
+                onChange={(event) => props.onVramSavingModeChange(event.currentTarget.checked)}
+              />
               <span>VRAM 節約モード</span>
             </label>
+            <label className="detect-modal__toggle-row">
+              <input
+                type="checkbox"
+                checked={props.overwriteManualTracks}
+                onChange={(event) => props.onOverwriteManualTracksChange(event.currentTarget.checked)}
+              />
+              <span>手動編集トラックも上書きする</span>
+            </label>
           </div>
+          {props.trackCount > 0 ? (
+            <p className="detect-modal__section-note detect-modal__section-note--hint">
+              現在 {props.trackCount} 件のトラックがあります。うち手動編集は {props.manualTrackCount} 件です。
+              {props.overwriteManualTracks
+                ? " このまま再検出すると手動編集も置き換えます。"
+                : " オフのままなら手動編集トラックは保護されます。"}
+            </p>
+          ) : null}
         </div>
 
         <div className="detect-modal__section">
@@ -312,21 +374,21 @@ export function DetectorSettingsModal(props: Props) {
               <span>輪郭モード</span>
               <div className="detect-modal__param-input">
                 <select value={props.contourMode} onChange={(event) => props.onContourModeChange(event.currentTarget.value)}>
-                  <option value="none">枠のみ(最速) — 輪郭抽出なし</option>
-                  <option value="fast">軽量輪郭(速い) — ざっくり、細部は崩れやすい</option>
-                  <option value="balanced">標準輪郭(普段使い) — 速度と形の安定性のバランス</option>
-                  <option value="quality">高精度輪郭(遅い / SAM2 使用)</option>
+                  <option value="none">なし (最速 / 輪郭抽出なし)</option>
+                  <option value="fast">高速輪郭 (軽量 / 顔向け)</option>
+                  <option value="balanced">標準輪郭 (既定 / 速度と形状のバランス)</option>
+                  <option value="quality">高精度輪郭 (重い / SAM2 使用)</option>
                 </select>
                 <em>mode</em>
               </div>
             </label>
             {!props.hasSam2 && props.contourMode === "quality" ? (
               <p className="detect-modal__section-note detect-modal__section-note--hint">
-                SAM2 encoder/decoder が未準備です。「不足モデルを取得」で取得してください。未準備のまま実行すると標準輪郭で処理します。
+                SAM2 encoder/decoder が未導入です。「不足モデルを取得」で導入してください。現状のまま実行すると標準輪郭で処理します。
               </p>
             ) : (
               <p className="detect-modal__section-note detect-modal__section-note--hint">
-                輪郭抽出に失敗した場合は自動で枠ベースに戻ります。高精度輪郭は検出器ではなく輪郭補助モデルです。
+                輪郭抽出に失敗した場合は自動で前段のマスクへ戻ります。高精度輪郭は検出結果が安定している素材向けです。
               </p>
             )}
           </div>
@@ -334,12 +396,12 @@ export function DetectorSettingsModal(props: Props) {
 
         <div className="detect-modal__section detect-modal__section--actions">
           <div className="detect-modal__section-header">
-            <span>実行アクション</span>
+            <span>検出アクション</span>
             <span className="detect-modal__section-note">不足時は取得と再チェックへすぐ進めます。</span>
           </div>
           <div className="guard-modal__actions detect-modal__actions">
             <button className="nle-btn nle-btn--accent" onClick={props.onRun} disabled={!selectedOption.available}>
-              検出開始
+              検出を開始
             </button>
             <button className="nle-btn nle-btn--gold" onClick={props.onFetchRequired} disabled={props.modelFetchBusy}>
               不足モデルを取得

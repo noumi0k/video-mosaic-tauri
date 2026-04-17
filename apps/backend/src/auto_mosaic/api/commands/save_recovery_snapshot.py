@@ -32,6 +32,15 @@ def run(payload: dict) -> dict:
 
     timestamp = payload.get("timestamp")
     read_model = payload.get("read_model")
+    current_frame = payload.get("current_frame")
+    if not isinstance(current_frame, int):
+        current_frame = 0
+    selected_track_id = payload.get("selected_track_id")
+    if not isinstance(selected_track_id, str):
+        selected_track_id = None
+    selected_keyframe_frame = payload.get("selected_keyframe_frame")
+    if not isinstance(selected_keyframe_frame, int):
+        selected_keyframe_frame = None
     confirmed_danger_frames = payload.get("confirmed_danger_frames")
     if isinstance(confirmed_danger_frames, list):
         confirmed_danger_frames = [str(item) for item in confirmed_danger_frames]
@@ -43,6 +52,9 @@ def run(payload: dict) -> dict:
         "project": project,
         "read_model": read_model if isinstance(read_model, (dict, list)) else None,
         "timestamp": str(timestamp) if timestamp is not None else "",
+        "current_frame": current_frame,
+        "selected_track_id": selected_track_id,
+        "selected_keyframe_frame": selected_keyframe_frame,
         "confirmed_danger_frames": confirmed_danger_frames,
     }
 

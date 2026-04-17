@@ -21,6 +21,13 @@ export type ExportSettings = {
   audio_mode: string;
   bitrate_kbps: number | null;
   encoder: "auto" | "gpu" | "cpu";
+  // M-B03 extended settings.
+  fps_mode?: "source" | "custom";
+  fps_custom?: number | null;
+  bitrate_mode?: "auto" | "manual" | "target_size";
+  target_size_mb?: number | null;
+  video_codec?: "h264" | "vp9";
+  container?: "auto" | "mp4" | "mov" | "webm";
 };
 
 export function ExportSettingsModal({
@@ -35,9 +42,18 @@ export function ExportSettingsModal({
   const [resolution, setResolution] = useState(defaultSettings.resolution);
   const [mosaicStrength, setMosaicStrength] = useState(defaultSettings.mosaic_strength);
   const [audioMode, setAudioMode] = useState(defaultSettings.audio_mode);
-  const [bitrateMode, setBitrateMode] = useState<"auto" | "manual">(defaultSettings.bitrate_kbps ? "manual" : "auto");
+  const [bitrateMode, setBitrateMode] = useState<"auto" | "manual" | "target_size">(
+    defaultSettings.bitrate_mode ?? (defaultSettings.bitrate_kbps ? "manual" : "auto"),
+  );
   const [bitrateKbps, setBitrateKbps] = useState(defaultSettings.bitrate_kbps ?? 16000);
+  const [targetSizeMb, setTargetSizeMb] = useState(defaultSettings.target_size_mb ?? 500);
   const [encoder, setEncoder] = useState<"auto" | "gpu" | "cpu">(defaultSettings.encoder ?? "auto");
+  const [fpsMode, setFpsMode] = useState<"source" | "custom">(defaultSettings.fps_mode ?? "source");
+  const [fpsCustom, setFpsCustom] = useState<number>(defaultSettings.fps_custom ?? 30);
+  const [videoCodec, setVideoCodec] = useState<"h264" | "vp9">(defaultSettings.video_codec ?? "h264");
+  const [container, setContainer] = useState<"auto" | "mp4" | "mov" | "webm">(
+    defaultSettings.container ?? "auto",
+  );
   const [selectedPreset, setSelectedPreset] = useState<string>("");
 
   useEffect(() => {
@@ -45,9 +61,14 @@ export function ExportSettingsModal({
     setResolution(defaultSettings.resolution);
     setMosaicStrength(defaultSettings.mosaic_strength);
     setAudioMode(defaultSettings.audio_mode);
-    setBitrateMode(defaultSettings.bitrate_kbps ? "manual" : "auto");
+    setBitrateMode(defaultSettings.bitrate_mode ?? (defaultSettings.bitrate_kbps ? "manual" : "auto"));
     setBitrateKbps(defaultSettings.bitrate_kbps ?? 16000);
+    setTargetSizeMb(defaultSettings.target_size_mb ?? 500);
     setEncoder(defaultSettings.encoder ?? "auto");
+    setFpsMode(defaultSettings.fps_mode ?? "source");
+    setFpsCustom(defaultSettings.fps_custom ?? 30);
+    setVideoCodec(defaultSettings.video_codec ?? "h264");
+    setContainer(defaultSettings.container ?? "auto");
     setSelectedPreset("");
   }, [defaultSettings, open]);
 
@@ -62,9 +83,14 @@ export function ExportSettingsModal({
     if (s.resolution) setResolution(s.resolution);
     if (typeof s.mosaic_strength === "number") setMosaicStrength(s.mosaic_strength);
     if (s.audio_mode) setAudioMode(s.audio_mode);
-    setBitrateMode(s.bitrate_kbps ? "manual" : "auto");
+    setBitrateMode(s.bitrate_mode ?? (s.bitrate_kbps ? "manual" : "auto"));
     setBitrateKbps(s.bitrate_kbps ?? 16000);
+    setTargetSizeMb(s.target_size_mb ?? 500);
     if (s.encoder) setEncoder(s.encoder);
+    if (s.fps_mode) setFpsMode(s.fps_mode);
+    if (typeof s.fps_custom === "number") setFpsCustom(s.fps_custom);
+    if (s.video_codec) setVideoCodec(s.video_codec);
+    if (s.container) setContainer(s.container);
   }
 
   function currentSettings(): ExportSettings {
@@ -74,6 +100,12 @@ export function ExportSettingsModal({
       audio_mode: audioMode,
       bitrate_kbps: bitrateMode === "manual" ? bitrateKbps : null,
       encoder,
+      fps_mode: fpsMode,
+      fps_custom: fpsMode === "custom" ? fpsCustom : null,
+      bitrate_mode: bitrateMode,
+      target_size_mb: bitrateMode === "target_size" ? targetSizeMb : null,
+      video_codec: videoCodec,
+      container,
     };
   }
 
@@ -140,6 +172,42 @@ export function ExportSettingsModal({
         </div>
 
         <div className="nle-form-row">
+          <label className="nle-form-label">コーデック</label>
+          <select
+            className="nle-select"
+            value={videoCodec}
+            onChange={(e) => {
+              const next = e.target.value as "h264" | "vp9";
+              setVideoCodec(next);
+              // Keep container compatible: VP9 only works with webm; flip
+              // container automatically when the current choice conflicts.
+              if (next === "vp9" && container !== "auto" && container !== "webm") {
+                setContainer("webm");
+              } else if (next === "h264" && container === "webm") {
+                setContainer("auto");
+              }
+            }}
+          >
+            <option value="h264">H.264 (libx264 / NVENC)</option>
+            <option value="vp9">VP9 (libvpx-vp9)</option>
+          </select>
+        </div>
+
+        <div className="nle-form-row">
+          <label className="nle-form-label">コンテナ</label>
+          <select
+            className="nle-select"
+            value={container}
+            onChange={(e) => setContainer(e.target.value as "auto" | "mp4" | "mov" | "webm")}
+          >
+            <option value="auto">自動 (出力拡張子)</option>
+            <option value="mp4" disabled={videoCodec === "vp9"}>mp4</option>
+            <option value="mov" disabled={videoCodec === "vp9"}>mov</option>
+            <option value="webm" disabled={videoCodec === "h264"}>webm</option>
+          </select>
+        </div>
+
+        <div className="nle-form-row">
           <label className="nle-form-label">モザイク強度</label>
           <input
             type="range" min={2} max={64} step={1}
@@ -153,26 +221,69 @@ export function ExportSettingsModal({
         <div className="nle-form-row">
           <label className="nle-form-label">音声</label>
           <select className="nle-select" value={audioMode} onChange={(e) => setAudioMode(e.target.value)}>
-            <option value="mux_if_possible">音声を含む</option>
+            <option value="mux_if_possible">音声を含む (AAC 再エンコード)</option>
+            <option value="copy_if_possible">音声コピー (再エンコードなし)</option>
+            <option value="encode">音声エンコード (192k)</option>
             <option value="video_only">映像のみ</option>
           </select>
         </div>
 
         <div className="nle-form-row">
+          <label className="nle-form-label">FPS</label>
+          <select
+            className="nle-select"
+            value={fpsMode}
+            onChange={(e) => setFpsMode(e.target.value as "source" | "custom")}
+          >
+            <option value="source">ソース (元の FPS)</option>
+            <option value="custom">カスタム</option>
+          </select>
+          {fpsMode === "custom" && (
+            <>
+              <input
+                type="number" min={1} max={240} step={1}
+                value={fpsCustom}
+                onChange={(e) => setFpsCustom(Number(e.target.value))}
+                style={{ width: 80 }}
+              />
+              <span>fps</span>
+            </>
+          )}
+        </div>
+
+        <div className="nle-form-row">
           <label className="nle-form-label">ビットレート</label>
-          <select className="nle-select" value={bitrateMode} onChange={(e) => setBitrateMode(e.target.value as "auto" | "manual")}>
-            <option value="auto">自動</option>
-            <option value="manual">手動</option>
+          <select
+            className="nle-select"
+            value={bitrateMode}
+            onChange={(e) => setBitrateMode(e.target.value as "auto" | "manual" | "target_size")}
+          >
+            <option value="auto">自動 (解像度依存)</option>
+            <option value="manual">手動 (kbps 指定)</option>
+            <option value="target_size">目標ファイルサイズ (MB)</option>
           </select>
           {bitrateMode === "manual" && (
-            <input
-              type="number" min={1000} max={100000} step={1000}
-              value={bitrateKbps}
-              onChange={(e) => setBitrateKbps(Number(e.target.value))}
-              style={{ width: 80 }}
-            />
+            <>
+              <input
+                type="number" min={1000} max={100000} step={1000}
+                value={bitrateKbps}
+                onChange={(e) => setBitrateKbps(Number(e.target.value))}
+                style={{ width: 90 }}
+              />
+              <span>kbps</span>
+            </>
           )}
-          {bitrateMode === "manual" && <span>kbps</span>}
+          {bitrateMode === "target_size" && (
+            <>
+              <input
+                type="number" min={1} max={100000} step={1}
+                value={targetSizeMb}
+                onChange={(e) => setTargetSizeMb(Number(e.target.value))}
+                style={{ width: 90 }}
+              />
+              <span>MB</span>
+            </>
+          )}
         </div>
 
         <div className="nle-form-row">

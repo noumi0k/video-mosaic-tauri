@@ -31,7 +31,8 @@ const SHORTCUT_GROUPS: ShortcutGroup[] = [
       { keys: "Space", description: "再生 / 一時停止" },
       { keys: "← / →", description: "±1 フレーム (Shift で ±10)" },
       { keys: "Home / End", description: "先頭 / 末尾フレームへ" },
-      { keys: "[ / ]", description: "前 / 次のキーフレームへ移動" },
+      { keys: "Shift+Home / Shift+End", description: "選択トラックの開始 / 終了フレームへ" },
+      { keys: "[ / ] / ↑ / ↓", description: "前 / 次のキーフレームへ移動" },
     ],
   },
   {
@@ -40,7 +41,6 @@ const SHORTCUT_GROUPS: ShortcutGroup[] = [
       { keys: "K", description: "現在フレームにキーフレーム追加" },
       { keys: "Shift+K", description: "選択中のキーフレーム削除" },
       { keys: "Ctrl+D", description: "キーフレームを複製" },
-      { keys: "Ctrl+Shift+D", description: "現在フレームを検出" },
     ],
   },
   {
@@ -64,6 +64,14 @@ const SHORTCUT_GROUPS: ShortcutGroup[] = [
     entries: [
       { keys: "I", description: "イン点を設定" },
       { keys: "O", description: "アウト点を設定" },
+    ],
+  },
+  {
+    title: "検出 / 書き出し",
+    entries: [
+      { keys: "Ctrl+Shift+D", description: "現在フレームを AI 検出" },
+      { keys: "Ctrl+Shift+R", description: "In〜Out 範囲を AI 検出 (マーカー未設定時は動画全体)" },
+      { keys: "Ctrl+M", description: "書き出し設定モーダルを開く" },
     ],
   },
   {

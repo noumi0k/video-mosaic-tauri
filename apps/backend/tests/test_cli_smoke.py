@@ -1468,6 +1468,28 @@ def test_create_track_accepts_polygon_shape():
     assert created_keyframe["points"] == [[0.2, 0.25], [0.38, 0.25], [0.38, 0.37], [0.2, 0.37]]
 
 
+def test_create_track_accepts_inline_project_when_unsaved():
+    created = create_project.run({"name": "InlineCreateTrack"})
+    inline_project = created["data"]["project"]
+    inline_project["project_path"] = None
+
+    response = create_track.run(
+        {
+            "project": inline_project,
+            "frame_index": 12,
+            "shape_type": "polygon",
+            "points": [[0.2, 0.2], [0.32, 0.2], [0.32, 0.34], [0.2, 0.34]],
+            "bbox": [0.2, 0.2, 0.12, 0.14],
+        }
+    )
+    assert response["ok"] is True
+    assert response["data"]["project_path"] is None
+    assert len(response["data"]["project"]["tracks"]) == 1
+    assert len(response["data"]["read_model"]["track_summaries"]) == 1
+    created_track = response["data"]["project"]["tracks"][0]
+    assert created_track["keyframes"][0]["shape_type"] == "polygon"
+
+
 def test_create_keyframe_accepts_valid_ellipse():
     project_path = TEST_ROOT / "create-ellipse.json"
     _write_mutation_project(project_path)
@@ -2579,6 +2601,207 @@ def test_export_video_rejects_invalid_options():
     assert invalid_audio["error"]["code"] == "INVALID_EXPORT_OPTIONS"
 
 
+def test_export_video_rejects_custom_fps_without_value():
+    project_path = TEST_ROOT / "export-fps-no-value.json"
+    _write_mutation_project(project_path)
+
+    response = export_video.run(
+        {
+            "project_path": str(project_path),
+            "output_path": str(TEST_ROOT / "export-fps-no-value.mp4"),
+            "options": {"fps_mode": "custom"},
+        }
+    )
+    assert response["ok"] is False
+    assert response["error"]["code"] == "INVALID_EXPORT_OPTIONS"
+    assert response["error"]["details"]["field"] == "fps_custom"
+
+
+def test_export_video_rejects_fps_custom_out_of_range():
+    project_path = TEST_ROOT / "export-fps-oor.json"
+    _write_mutation_project(project_path)
+
+    response = export_video.run(
+        {
+            "project_path": str(project_path),
+            "output_path": str(TEST_ROOT / "export-fps-oor.mp4"),
+            "options": {"fps_mode": "custom", "fps_custom": 500.0},
+        }
+    )
+    assert response["ok"] is False
+    assert response["error"]["code"] == "INVALID_EXPORT_OPTIONS"
+    assert response["error"]["details"]["field"] == "fps_custom"
+
+
+def test_export_video_rejects_target_size_without_value():
+    project_path = TEST_ROOT / "export-target-no-value.json"
+    _write_mutation_project(project_path)
+
+    response = export_video.run(
+        {
+            "project_path": str(project_path),
+            "output_path": str(TEST_ROOT / "export-target-no-value.mp4"),
+            "options": {"bitrate_mode": "target_size"},
+        }
+    )
+    assert response["ok"] is False
+    assert response["error"]["code"] == "INVALID_EXPORT_OPTIONS"
+    assert response["error"]["details"]["field"] == "target_size_mb"
+
+
+def test_export_video_rejects_manual_bitrate_without_value():
+    project_path = TEST_ROOT / "export-manual-no-value.json"
+    _write_mutation_project(project_path)
+
+    response = export_video.run(
+        {
+            "project_path": str(project_path),
+            "output_path": str(TEST_ROOT / "export-manual-no-value.mp4"),
+            "options": {"bitrate_mode": "manual"},
+        }
+    )
+    assert response["ok"] is False
+    assert response["error"]["code"] == "INVALID_EXPORT_OPTIONS"
+    assert response["error"]["details"]["field"] == "bitrate_kbps"
+
+
+def test_export_video_accepts_spec_audio_aliases():
+    project_path = TEST_ROOT / "export-audio-alias.json"
+    _write_mutation_project(project_path)
+
+    # "none" should be accepted and normalized internally.
+    response = export_video.run(
+        {
+            "project_path": str(project_path),
+            "output_path": str(TEST_ROOT / "export-audio-alias.mp4"),
+            "options": {"audio_mode": "none"},
+        }
+    )
+    # May succeed or fail depending on ffmpeg availability; what matters is
+    # that it is NOT rejected as INVALID_EXPORT_OPTIONS.
+    if not response["ok"]:
+        assert response["error"]["code"] != "INVALID_EXPORT_OPTIONS"
+
+
+def test_export_video_rejects_invalid_video_codec():
+    project_path = TEST_ROOT / "export-invalid-codec.json"
+    _write_mutation_project(project_path)
+
+    response = export_video.run(
+        {
+            "project_path": str(project_path),
+            "output_path": str(TEST_ROOT / "export-invalid-codec.mp4"),
+            "options": {"video_codec": "h265"},
+        }
+    )
+    assert response["ok"] is False
+    assert response["error"]["code"] == "INVALID_EXPORT_OPTIONS"
+    assert response["error"]["details"]["field"] == "video_codec"
+
+
+def test_export_video_rejects_invalid_container():
+    project_path = TEST_ROOT / "export-invalid-container.json"
+    _write_mutation_project(project_path)
+
+    response = export_video.run(
+        {
+            "project_path": str(project_path),
+            "output_path": str(TEST_ROOT / "export-invalid-container.avi"),
+            "options": {"container": "avi"},
+        }
+    )
+    assert response["ok"] is False
+    assert response["error"]["code"] == "INVALID_EXPORT_OPTIONS"
+    assert response["error"]["details"]["field"] == "container"
+
+
+def test_export_video_rejects_incompatible_codec_container():
+    project_path = TEST_ROOT / "export-incompat.json"
+    _write_mutation_project(project_path)
+
+    response = export_video.run(
+        {
+            "project_path": str(project_path),
+            "output_path": str(TEST_ROOT / "export-incompat.mp4"),
+            "options": {"video_codec": "vp9", "container": "mp4"},
+        }
+    )
+    assert response["ok"] is False
+    assert response["error"]["code"] == "EXPORT_CODEC_CONTAINER_INVALID"
+
+
+def test_export_video_target_size_computes_bitrate_from_duration(tmp_path, monkeypatch):
+    source_path = tmp_path / "target-size-source.mp4"
+    output_path = tmp_path / "target-size-output.mp4"
+    _make_sample_video(source_path)
+
+    captured: dict[str, object] = {}
+
+    real_export = export_infra.export_project_video
+
+    def _capture(*args, **kwargs):
+        captured.update(kwargs)
+        return real_export(*args, **kwargs)
+
+    monkeypatch.setattr(export_infra, "export_project_video", _capture)
+    monkeypatch.setattr(
+        "auto_mosaic.api.commands.export_video.export_project_video",
+        _capture,
+    )
+
+    project_path = tmp_path / "target-size-project.json"
+    project_path.write_text(
+        json.dumps(
+            {
+                "project_id": "target-size",
+                "version": "0.1.0",
+                "schema_version": CURRENT_PROJECT_SCHEMA_VERSION,
+                "name": "target size",
+                "project_path": str(project_path),
+                "video": {
+                    "source_path": str(source_path),
+                    "width": 160,
+                    "height": 90,
+                    "fps": 24.0,
+                    "frame_count": 8,
+                    "duration_sec": 8 / 24.0,
+                    "readable": True,
+                    "warnings": [],
+                    "errors": [],
+                    "first_frame_shape": [90, 160, 3],
+                },
+                "tracks": [],
+                "detector_config": {},
+                "export_preset": {},
+                "paths": {},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    response = export_video.run(
+        {
+            "project_path": str(project_path),
+            "output_path": str(output_path),
+            "options": {
+                "audio_mode": "video_only",
+                "bitrate_mode": "target_size",
+                "target_size_mb": 5.0,
+            },
+        }
+    )
+    # Regardless of ffmpeg availability, kwargs should reach export_project_video.
+    assert captured.get("bitrate_mode") == "target_size"
+    assert captured.get("target_size_mb") == 5.0
+    # If export succeeded, result should reflect the computed bitrate.
+    if response["ok"]:
+        data = response["data"]
+        assert data["bitrate_mode"] == "target_size"
+        # 5 MB over 8 frames / 24 fps = 1/3 sec → ~122.88 Mbps (huge), but
+        # we just assert it's > auto default (8000 kbps for 160x90).
+        assert data["bitrate_kbps"] > 8000
+
+
 def test_export_video_can_be_cancelled_and_cleans_output(monkeypatch):
     source_path = TEST_ROOT / "export-cancel-source.mp4"
     output_path = TEST_ROOT / "export-cancel-output.mp4"
@@ -2832,14 +3055,19 @@ def test_recovery_snapshot_save_list_delete_roundtrip(tmp_path, monkeypatch):
             "project": project_payload,
             "read_model": {"track_summaries": [], "track_count": 0},
             "timestamp": "2026-04-17T10:00:00.000Z",
+            "current_frame": 42,
+            "selected_track_id": "track-1",
+            "selected_keyframe_frame": 40,
         }
     )
     assert save_response["ok"] is True
 
     list_response = list_recovery_snapshots.run({})
     assert list_response["ok"] is True
-    ids = [snap["id"] for snap in list_response["data"]["snapshots"]]
-    assert "demo-1" in ids
+    snapshot = next(snap for snap in list_response["data"]["snapshots"] if snap["id"] == "demo-1")
+    assert snapshot["current_frame"] == 42
+    assert snapshot["selected_track_id"] == "track-1"
+    assert snapshot["selected_keyframe_frame"] == 40
 
     delete_response = delete_recovery_snapshot.run({"snapshot_id": "demo-1"})
     assert delete_response["ok"] is True
@@ -2945,6 +3173,349 @@ def test_list_recovery_snapshots_reports_broken_entries(tmp_path, monkeypatch):
     assert response["data"]["snapshots"] == []
     assert len(response["data"]["broken"]) == 1
     assert Path(response["data"]["broken"][0]["path"]).name == "broken.json"
+
+
+def test_detect_settings_save_load_roundtrip(tmp_path, monkeypatch):
+    monkeypatch.setenv("AUTO_MOSAIC_DATA_DIR", str(tmp_path))
+    from auto_mosaic.api.commands import load_detect_settings, save_detect_settings
+
+    empty = load_detect_settings.run({})
+    assert empty["ok"] is True
+    assert empty["data"]["settings"] is None
+    assert empty["data"]["broken"] is False
+
+    saved = save_detect_settings.run(
+        {
+            "settings": {
+                "backend": "nudenet_320n",
+                "device": "auto",
+                "confidence_threshold": 0.42,
+                "sample_every": 4,
+                "max_samples": 200,
+                "inference_resolution": 640,
+                "batch_size": 2,
+                "contour_mode": "balanced",
+                "precise_face_contour": True,
+                "vram_saving_mode": False,
+                "selected_categories": ["genital_m", "breast"],
+            }
+        }
+    )
+    assert saved["ok"] is True
+    assert saved["data"]["settings"]["backend"] == "nudenet_320n"
+    assert saved["data"]["settings"]["confidence_threshold"] == 0.42
+    assert saved["data"]["settings"]["selected_categories"] == ["genital_m", "breast"]
+
+    loaded = load_detect_settings.run({})
+    assert loaded["ok"] is True
+    assert loaded["data"]["broken"] is False
+    assert loaded["data"]["settings"]["backend"] == "nudenet_320n"
+    assert loaded["data"]["settings"]["sample_every"] == 4
+    assert loaded["data"]["settings"]["precise_face_contour"] is True
+
+
+def test_detect_settings_save_rejects_non_object_payload(tmp_path, monkeypatch):
+    monkeypatch.setenv("AUTO_MOSAIC_DATA_DIR", str(tmp_path))
+    from auto_mosaic.api.commands import save_detect_settings
+
+    response = save_detect_settings.run({"settings": "not-an-object"})
+    assert response["ok"] is False
+    assert response["error"]["code"] == "DETECT_SETTINGS_REQUIRED"
+
+
+def test_detect_settings_load_reports_broken_file(tmp_path, monkeypatch):
+    monkeypatch.setenv("AUTO_MOSAIC_DATA_DIR", str(tmp_path))
+    from auto_mosaic.api.commands import load_detect_settings
+
+    config_dir = Path(tmp_path) / "config"
+    config_dir.mkdir(parents=True, exist_ok=True)
+    (config_dir / "detect-settings.json").write_text("not json", encoding="utf-8")
+
+    response = load_detect_settings.run({})
+    assert response["ok"] is True
+    assert response["data"]["settings"] is None
+    assert response["data"]["broken"] is True
+
+
+def test_list_installed_models_reports_onnx_files(tmp_path, monkeypatch):
+    monkeypatch.setenv("AUTO_MOSAIC_DATA_DIR", str(tmp_path))
+    model_dir = tmp_path / "models"
+    model_dir.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setenv("AUTO_MOSAIC_MODEL_DIR", str(model_dir))
+    # Write a large-enough plausible ONNX file (>= _MIN_MODEL_BYTES)
+    from auto_mosaic.infra.ai.model_catalog import ONNX_MAGIC_BYTES
+    magic_byte = next(iter(ONNX_MAGIC_BYTES))
+    fake = bytes([magic_byte]) + b"\x00" * 2048
+    (model_dir / "custom_probe.onnx").write_bytes(fake)
+
+    from auto_mosaic.api.commands import list_installed_models
+
+    response = list_installed_models.run({})
+    assert response["ok"] is True
+    names = [item["name"] for item in response["data"]["items"]]
+    assert "custom_probe.onnx" in names
+    item = next(item for item in response["data"]["items"] if item["name"] == "custom_probe.onnx")
+    assert item["status"] in {"installed", "broken"}
+    assert item["known"] is False
+
+
+def test_delete_installed_model_rejects_path_traversal(tmp_path, monkeypatch):
+    monkeypatch.setenv("AUTO_MOSAIC_DATA_DIR", str(tmp_path))
+    model_dir = tmp_path / "models"
+    model_dir.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setenv("AUTO_MOSAIC_MODEL_DIR", str(model_dir))
+
+    from auto_mosaic.api.commands import delete_installed_model
+
+    traversal = delete_installed_model.run({"name": "../escape.onnx"})
+    assert traversal["ok"] is False
+    assert traversal["error"]["code"] == "MODEL_NAME_INVALID"
+
+    with_slash = delete_installed_model.run({"name": "sub/path.onnx"})
+    assert with_slash["ok"] is False
+    assert with_slash["error"]["code"] == "MODEL_NAME_INVALID"
+
+
+def test_duplicate_track_copies_keyframes_with_new_id():
+    from auto_mosaic.api.commands import duplicate_track
+
+    project_path = TEST_ROOT / "duplicate-track.json"
+    _write_mutation_project(project_path)
+
+    response = duplicate_track.run(
+        {"project_path": str(project_path), "track_id": "track-main"}
+    )
+    assert response["ok"] is True
+    new_id = response["data"]["selection"]["track_id"]
+    assert new_id != "track-main"
+
+    loaded = load_project.run({"project_path": str(project_path)})
+    tracks = loaded["data"]["project"]["tracks"]
+    assert len(tracks) == 2
+    original = next(t for t in tracks if t["track_id"] == "track-main")
+    duplicated = next(t for t in tracks if t["track_id"] == new_id)
+    assert duplicated["label"] == f"{original['label']} (copy)"
+    assert len(duplicated["keyframes"]) == len(original["keyframes"])
+    assert duplicated["user_edited"] is True
+    assert duplicated["user_locked"] is False
+
+
+def test_duplicate_track_returns_track_not_found_for_missing_id():
+    from auto_mosaic.api.commands import duplicate_track
+
+    project_path = TEST_ROOT / "duplicate-track-missing.json"
+    _write_mutation_project(project_path)
+
+    response = duplicate_track.run(
+        {"project_path": str(project_path), "track_id": "does-not-exist"}
+    )
+    assert response["ok"] is False
+    assert response["error"]["code"] == "TRACK_NOT_FOUND"
+
+
+def test_split_track_partitions_keyframes_at_frame():
+    from auto_mosaic.api.commands import split_track
+
+    project_path = TEST_ROOT / "split-track.json"
+    _write_mutation_project(project_path)
+
+    # Seed additional keyframes to make a split meaningful.
+    create_keyframe.run(
+        {
+            "project_path": str(project_path),
+            "track_id": "track-main",
+            "frame_index": 30,
+            "source": "manual",
+            "shape_type": "polygon",
+        }
+    )
+    create_keyframe.run(
+        {
+            "project_path": str(project_path),
+            "track_id": "track-main",
+            "frame_index": 50,
+            "source": "manual",
+            "shape_type": "polygon",
+        }
+    )
+
+    response = split_track.run(
+        {"project_path": str(project_path), "track_id": "track-main", "split_frame": 30}
+    )
+    assert response["ok"] is True
+    new_id = response["data"]["selection"]["track_id"]
+
+    loaded = load_project.run({"project_path": str(project_path)})
+    tracks = loaded["data"]["project"]["tracks"]
+    left = next(t for t in tracks if t["track_id"] == "track-main")
+    right = next(t for t in tracks if t["track_id"] == new_id)
+
+    assert [kf["frame_index"] for kf in left["keyframes"]] == [10]
+    assert sorted(kf["frame_index"] for kf in right["keyframes"]) == [30, 50]
+    assert right["label"].endswith("(split)")
+    assert right["user_edited"] is True
+
+
+def test_duplicate_track_accepts_inline_project_when_unsaved():
+    from auto_mosaic.api.commands import duplicate_track
+
+    created = create_project.run(
+        {
+            "name": "InlineDuplicateProject",
+            "tracks": [
+                {
+                    "track_id": "inline-track",
+                    "label": "inline",
+                    "state": "active",
+                    "source": "manual",
+                    "visible": True,
+                    "keyframes": [
+                        {
+                            "frame_index": 0,
+                            "shape_type": "polygon",
+                            "points": [[0.1, 0.1], [0.2, 0.1], [0.2, 0.2]],
+                            "bbox": [0.1, 0.1, 0.1, 0.1],
+                            "confidence": 1.0,
+                            "source": "manual",
+                        }
+                    ],
+                }
+            ],
+        }
+    )
+    # Clear project_path to simulate unsaved state.
+    inline_project = created["data"]["project"]
+    inline_project["project_path"] = None
+
+    response = duplicate_track.run(
+        {"project": inline_project, "track_id": "inline-track"}
+    )
+    assert response["ok"] is True
+    assert response["data"]["project_path"] is None
+    assert len(response["data"]["project"]["tracks"]) == 2
+
+
+def test_split_track_accepts_inline_project_when_unsaved():
+    from auto_mosaic.api.commands import split_track
+
+    created = create_project.run(
+        {
+            "name": "InlineSplitProject",
+            "tracks": [
+                {
+                    "track_id": "inline-split",
+                    "label": "inline",
+                    "state": "active",
+                    "source": "manual",
+                    "visible": True,
+                    "keyframes": [
+                        {
+                            "frame_index": 5,
+                            "shape_type": "polygon",
+                            "points": [[0.1, 0.1], [0.2, 0.1], [0.2, 0.2]],
+                            "bbox": [0.1, 0.1, 0.1, 0.1],
+                            "source": "manual",
+                        },
+                        {
+                            "frame_index": 25,
+                            "shape_type": "polygon",
+                            "points": [[0.1, 0.1], [0.2, 0.1], [0.2, 0.2]],
+                            "bbox": [0.1, 0.1, 0.1, 0.1],
+                            "source": "manual",
+                        },
+                    ],
+                }
+            ],
+        }
+    )
+    inline_project = created["data"]["project"]
+    inline_project["project_path"] = None
+
+    response = split_track.run(
+        {"project": inline_project, "track_id": "inline-split", "split_frame": 15}
+    )
+    assert response["ok"] is True
+    assert response["data"]["project_path"] is None
+    assert len(response["data"]["project"]["tracks"]) == 2
+
+
+def test_save_project_accepts_inline_project_without_path():
+    created = create_project.run(
+        {"name": "InlineSaveProject", "tracks": []}
+    )
+    inline_project = created["data"]["project"]
+    inline_project["project_path"] = None
+
+    response = save_project.run({"project": inline_project})
+    assert response["ok"] is True
+    assert response["data"]["project_path"] is None
+    assert response["data"]["bytes_written"] is None
+    assert response["data"]["selection"] == {"track_id": None, "frame_index": None}
+
+
+def test_split_track_rejects_empty_side():
+    from auto_mosaic.api.commands import split_track
+
+    project_path = TEST_ROOT / "split-track-empty.json"
+    _write_mutation_project(project_path)
+
+    # Original project has only one keyframe at frame 10; splitting at 5
+    # would leave the left side empty.
+    response = split_track.run(
+        {"project_path": str(project_path), "track_id": "track-main", "split_frame": 5}
+    )
+    assert response["ok"] is False
+    assert response["error"]["code"] == "SPLIT_EMPTY_SIDE"
+
+
+def test_delete_installed_model_removes_existing_file(tmp_path, monkeypatch):
+    monkeypatch.setenv("AUTO_MOSAIC_DATA_DIR", str(tmp_path))
+    model_dir = tmp_path / "models"
+    model_dir.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setenv("AUTO_MOSAIC_MODEL_DIR", str(model_dir))
+    target = model_dir / "removable.onnx"
+    target.write_bytes(b"\x08" + b"\x00" * 2048)
+
+    from auto_mosaic.api.commands import delete_installed_model
+
+    first = delete_installed_model.run({"name": "removable.onnx"})
+    assert first["ok"] is True
+    assert first["data"]["deleted"] is True
+    assert not target.exists()
+
+    # Idempotent: deleting again reports deleted=False but still ok=True.
+    again = delete_installed_model.run({"name": "removable.onnx"})
+    assert again["ok"] is True
+    assert again["data"]["deleted"] is False
+
+
+def test_detect_settings_coerces_unexpected_field_shapes(tmp_path, monkeypatch):
+    monkeypatch.setenv("AUTO_MOSAIC_DATA_DIR", str(tmp_path))
+    from auto_mosaic.api.commands import load_detect_settings, save_detect_settings
+
+    saved = save_detect_settings.run(
+        {
+            "settings": {
+                "backend": "nudenet_320n",
+                "confidence_threshold": "not-a-number",
+                "sample_every": 3.0,
+                "batch_size": True,
+                "selected_categories": ["ok", 42, None, "breast"],
+                "unknown_field": "ignored",
+            }
+        }
+    )
+    assert saved["ok"] is True
+    cleaned = saved["data"]["settings"]
+    assert "confidence_threshold" not in cleaned
+    assert cleaned["sample_every"] == 3
+    assert "batch_size" not in cleaned
+    assert cleaned["selected_categories"] == ["ok", "breast"]
+    assert "unknown_field" not in cleaned
+
+    loaded = load_detect_settings.run({})
+    assert loaded["ok"] is True
+    assert loaded["data"]["settings"] == cleaned
 
 
 def test_update_track_roundtrip():

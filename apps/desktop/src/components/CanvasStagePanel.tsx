@@ -32,6 +32,13 @@ type DragState =
     }
   | { mode: "move-polygon"; originX: number; originY: number; startPoints: NormalizedPoint[] };
 
+type VertexMenuState = {
+  addAfterIndex: number;
+  deleteIndex: number;
+  x: number;
+  y: number;
+};
+
 type CanvasStagePanelProps = {
   video: VideoMetadata | null;
   track: TrackSummary | null;
@@ -59,6 +66,36 @@ type CanvasStagePanelProps = {
 
 function toPercent(value: number) {
   return `${Math.max(0, Math.min(value, 1)) * 100}%`;
+}
+
+function findNearestVertexIndex(points: readonly NormalizedPoint[], target: NormalizedPoint): number {
+  let bestIndex = 0;
+  let bestDistance = Infinity;
+  for (let index = 0; index < points.length; index += 1) {
+    const point = points[index]!;
+    const distance = Math.hypot(point[0] - target[0], point[1] - target[1]);
+    if (distance < bestDistance) {
+      bestDistance = distance;
+      bestIndex = index;
+    }
+  }
+  return bestIndex;
+}
+
+function findNearestEdgeIndex(points: readonly NormalizedPoint[], target: NormalizedPoint): number {
+  let bestIndex = 0;
+  let bestDistance = Infinity;
+  for (let index = 0; index < points.length; index += 1) {
+    const left = points[index]!;
+    const right = points[(index + 1) % points.length]!;
+    const mid = midpoint(left, right);
+    const distance = Math.hypot(mid[0] - target[0], mid[1] - target[1]);
+    if (distance < bestDistance) {
+      bestDistance = distance;
+      bestIndex = index;
+    }
+  }
+  return bestIndex;
 }
 
 function renderDiffShape(keyframe: Keyframe, trackId: string) {
@@ -152,13 +189,14 @@ export function CanvasStagePanel({
   onCommitKeyframePatch,
 }: CanvasStagePanelProps) {
   const stageRef = useRef<HTMLDivElement | null>(null);
+  const contextMenuRef = useRef<HTMLDivElement | null>(null);
   const draftBBoxRef = useRef<NormalizedBBox | null>(null);
   const draftPointsRef = useRef<NormalizedPoint[] | null>(null);
   const [draftBBox, setDraftBBox] = useState<NormalizedBBox | null>(null);
   const [draftPoints, setDraftPoints] = useState<NormalizedPoint[] | null>(null);
   const [dragState, setDragState] = useState<DragState | null>(null);
   const [selectedVertexIndex, setSelectedVertexIndex] = useState<number | null>(null);
-  const [vertexMenu, setVertexMenu] = useState<{ index: number; x: number; y: number } | null>(null);
+  const [vertexMenu, setVertexMenu] = useState<VertexMenuState | null>(null);
   const [localError, setLocalError] = useState<string>("");
 
   const committedBBox = useMemo(() => {
@@ -179,6 +217,7 @@ export function CanvasStagePanel({
   const isEditablePolygon = keyframeDocument?.shape_type === "polygon" && (committedPoints?.length ?? 0) >= 3;
   const activeBBox = draftBBox ?? committedBBox;
   const activePoints = draftPoints ?? committedPoints;
+  const showLegacyEllipseFrame = Boolean(activeBBox) && !activePoints?.length;
 
   useEffect(() => {
     if (dragState) return;
@@ -191,6 +230,27 @@ export function CanvasStagePanel({
     setLocalError("");
     onPreviewKeyframeChange(null);
   }, [committedBBox, committedPoints, dragState, keyframeDocument?.frame_index, onPreviewKeyframeChange, track?.track_id]);
+
+  useEffect(() => {
+    if (!vertexMenu) return;
+    const stage = stageRef.current;
+    const menu = contextMenuRef.current;
+    if (!stage || !menu) return;
+
+    const stageRect = stage.getBoundingClientRect();
+    const menuRect = menu.getBoundingClientRect();
+    const margin = 8;
+    const maxX = Math.max(margin, stageRect.width - menuRect.width - margin);
+    const maxY = Math.max(margin, stageRect.height - menuRect.height - margin);
+    const nextX = Math.min(Math.max(vertexMenu.x, margin), maxX);
+    const nextY = Math.min(Math.max(vertexMenu.y, margin), maxY);
+
+    if (nextX !== vertexMenu.x || nextY !== vertexMenu.y) {
+      setVertexMenu((current) =>
+        current ? { ...current, x: nextX, y: nextY } : current,
+      );
+    }
+  }, [vertexMenu]);
 
   async function commitPolygonPoints(nextPoints: NormalizedPoint[], nextSelectedVertexIndex: number | null) {
     setLocalError("");
@@ -411,19 +471,42 @@ export function CanvasStagePanel({
     await commitPolygonPoints(nextPoints, nextSelected);
   }
 
+  function openVertexMenuForPoint(point: NormalizedPoint, x: number, y: number) {
+    if (!activePoints || busy) return;
+    setLocalError("");
+    const deleteIndex = findNearestVertexIndex(activePoints, point);
+    const addAfterIndex = findNearestEdgeIndex(activePoints, point);
+    setSelectedVertexIndex(deleteIndex);
+    setVertexMenu({
+      addAfterIndex,
+      deleteIndex,
+      x,
+      y,
+    });
+  }
+
   function openVertexMenu(index: number, event: React.MouseEvent<HTMLButtonElement>) {
     if (!activePoints || busy) return;
     const rect = stageRef.current?.getBoundingClientRect();
     if (!rect) return;
     event.preventDefault();
     event.stopPropagation();
-    setLocalError("");
-    setSelectedVertexIndex(index);
-    setVertexMenu({
-      index,
-      x: event.clientX - rect.left,
-      y: event.clientY - rect.top,
-    });
+    openVertexMenuForPoint(activePoints[index]!, event.clientX - rect.left, event.clientY - rect.top);
+  }
+
+  function openPolygonContextMenu(event: React.MouseEvent<SVGPolygonElement>) {
+    if (!activePoints || busy) return;
+    const svg = event.currentTarget.ownerSVGElement;
+    if (!svg) return;
+    const rect = svg.getBoundingClientRect();
+    if (rect.width <= 0 || rect.height <= 0) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const point: NormalizedPoint = [
+      (event.clientX - rect.left) / rect.width,
+      (event.clientY - rect.top) / rect.height,
+    ];
+    openVertexMenuForPoint(point, event.clientX - rect.left, event.clientY - rect.top);
   }
 
   async function handleDeleteSelectedVertex() {
@@ -439,6 +522,14 @@ export function CanvasStagePanel({
         ref={stageRef}
         className={`canvas-stage ${dragState ? "canvas-stage--dragging" : ""} ${busy ? "canvas-stage--saving" : ""}`}
         style={{ aspectRatio: `${video.width} / ${video.height}`, maxWidth: "100%", maxHeight: "100%" }}
+        onContextMenuCapture={(event) => {
+          if ((event.target as HTMLElement).closest(".canvas-stage__context-menu")) return;
+          event.preventDefault();
+        }}
+        onContextMenu={(event) => {
+          if ((event.target as HTMLElement).closest(".canvas-stage__context-menu")) return;
+          event.preventDefault();
+        }}
         onPointerDown={(event) => {
           if (event.button !== 0) return;
           if ((event.target as HTMLElement).closest(".canvas-stage__context-menu")) return;
@@ -510,6 +601,7 @@ export function CanvasStagePanel({
               className={`canvas-stage__polygon ${isEditablePolygon ? "canvas-stage__polygon--editable" : ""}`}
               points={activePoints.map(([x, y]) => `${x},${y}`).join(" ")}
               onPointerDown={isEditablePolygon ? beginPolygonMove : undefined}
+              onContextMenu={isEditablePolygon ? openPolygonContextMenu : undefined}
               onDoubleClick={isEditablePolygon ? (event) => {
                 // Double-click on polygon edge → add vertex at nearest edge midpoint
                 const svg = (event.target as SVGElement).closest("svg");
@@ -533,16 +625,16 @@ export function CanvasStagePanel({
             />
           </svg>
         ) : null}
-        {activeBBox ? (
+        {showLegacyEllipseFrame ? (
           <div
             className={`canvas-stage__bbox ${isEditableEllipse ? "canvas-stage__bbox--editable" : ""} ${
               dragState && dragState.mode !== "move-polygon-vertex" ? "canvas-stage__bbox--active" : ""
             }`}
             style={{
-              left: toPercent(activeBBox[0]),
-              top: toPercent(activeBBox[1]),
-              width: toPercent(activeBBox[2]),
-              height: toPercent(activeBBox[3]),
+              left: toPercent(activeBBox![0]),
+              top: toPercent(activeBBox![1]),
+              width: toPercent(activeBBox![2]),
+              height: toPercent(activeBBox![3]),
             }}
             onPointerDown={isEditableEllipse ? beginMove : undefined}
           >
@@ -605,16 +697,23 @@ export function CanvasStagePanel({
             </div>
             {vertexMenu ? (
               <div
+                ref={contextMenuRef}
                 className="canvas-stage__context-menu"
                 style={{ left: vertexMenu.x, top: vertexMenu.y }}
                 onPointerDown={(event) => event.stopPropagation()}
               >
-                <button type="button" onClick={() => void handleAddVertex(vertexMenu.index)} disabled={busy}>
+                <button
+                  type="button"
+                  onPointerDown={(event) => { event.preventDefault(); event.stopPropagation(); }}
+                  onClick={() => void handleAddVertex(vertexMenu.addAfterIndex)}
+                  disabled={busy}
+                >
                   頂点追加
                 </button>
                 <button
                   type="button"
-                  onClick={() => void handleDeleteVertex(vertexMenu.index)}
+                  onPointerDown={(event) => { event.preventDefault(); event.stopPropagation(); }}
+                  onClick={() => void handleDeleteVertex(vertexMenu.deleteIndex)}
                   disabled={busy || (activePoints?.length ?? 0) <= 3}
                 >
                   頂点削除

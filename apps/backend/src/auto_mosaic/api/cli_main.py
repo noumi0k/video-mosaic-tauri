@@ -55,6 +55,12 @@ COMMAND_MODULES: dict[str, str] = {
     "list-export-presets": "list_export_presets",
     "save-export-preset": "save_export_preset",
     "delete-export-preset": "delete_export_preset",
+    "load-detect-settings": "load_detect_settings",
+    "save-detect-settings": "save_detect_settings",
+    "list-installed-models": "list_installed_models",
+    "delete-installed-model": "delete_installed_model",
+    "duplicate-track": "duplicate_track",
+    "split-track": "split_track",
 }
 COMMAND_HANDLERS: dict[str, Callable[[dict], dict]] = {}
 

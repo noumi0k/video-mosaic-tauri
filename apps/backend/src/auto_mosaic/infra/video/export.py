@@ -72,15 +72,32 @@ def _build_encoder_cmd_fragment(
     encoder_pref: str,
     ffmpeg_path: str,
     bitrate_kbps: int,
+    video_codec: str = "h264",
 ) -> tuple[list[str], str, str | None]:
     """Return (ffmpeg_args, encoder_name_used, warning_or_None).
 
     encoder_pref: "auto" | "gpu" | "cpu"
+    video_codec: "h264" | "vp9"
     """
     br = bitrate_kbps
     maxrate = int(br * 1.5)
     bufsize = br * 2
 
+    if video_codec == "vp9":
+        # VP9 has no mainstream GPU encoder path in ffmpeg; always libvpx-vp9.
+        args = [
+            "-c:v", "libvpx-vp9",
+            "-b:v", f"{br}k",
+            "-deadline", "good",
+            "-cpu-used", "2",
+            "-pix_fmt", "yuv420p",
+        ]
+        warning = None
+        if encoder_pref == "gpu":
+            warning = "VP9 has no GPU encoder in this ffmpeg build; using CPU libvpx-vp9."
+        return args, "libvpx-vp9", warning
+
+    # H.264 path (existing behaviour).
     if encoder_pref == "cpu":
         args = [
             "-c:v", "libx264", "-preset", "medium",
@@ -130,6 +147,51 @@ def _build_encoder_cmd_fragment(
         "-pix_fmt", "yuv420p",
     ]
     return args, "libx264", warning
+
+
+# Codec ↔ container compatibility and default audio codec per container.
+# `container_ext` is the canonical filename extension including the dot.
+_CODEC_CONTAINER_MATRIX: dict[tuple[str, str], dict[str, str]] = {
+    ("h264", "mp4"): {"container_ext": ".mp4", "audio_codec": "aac"},
+    ("h264", "mov"): {"container_ext": ".mov", "audio_codec": "aac"},
+    ("vp9", "webm"): {"container_ext": ".webm", "audio_codec": "libopus"},
+}
+
+
+def _resolve_codec_container(
+    video_codec: str,
+    container: str,
+    output_suffix: str,
+) -> tuple[str, str, str, str | None]:
+    """Return (resolved_codec, resolved_container, audio_codec, warning).
+
+    If container == "auto", infer from output_suffix. Unsupported combinations
+    raise ValueError so callers can surface a validation failure.
+    """
+    resolved_codec = video_codec if video_codec in {"h264", "vp9"} else "h264"
+
+    if container == "auto":
+        suffix = output_suffix.lower()
+        if suffix == ".webm":
+            resolved_container = "webm"
+        elif suffix == ".mov":
+            resolved_container = "mov"
+        else:
+            resolved_container = "mp4"
+    elif container in {"mp4", "mov", "webm"}:
+        resolved_container = container
+    else:
+        resolved_container = "mp4"
+
+    key = (resolved_codec, resolved_container)
+    if key not in _CODEC_CONTAINER_MATRIX:
+        raise ValueError(
+            f"Unsupported codec/container combination: {resolved_codec}/{resolved_container}. "
+            f"Use h264+mp4/mov or vp9+webm."
+        )
+
+    entry = _CODEC_CONTAINER_MATRIX[key]
+    return resolved_codec, resolved_container, entry["audio_codec"], None
 
 
 # ---------------------------------------------------------------------------
@@ -332,6 +394,7 @@ def _ffmpeg_pipe_export(
     out_w: int,
     out_h: int,
     fps: float,
+    output_fps: float,
     total_frames: int,
     mosaic_strength: int,
     audio_mode: str,
@@ -339,21 +402,28 @@ def _ffmpeg_pipe_export(
     job_id: str | None,
     ffmpeg_path: str,
     encoder_pref: str = "auto",
+    video_codec: str = "h264",
+    audio_codec: str = "aac",
 ) -> tuple[int, str, str, list[str]]:
     """Render frames through an ffmpeg rawvideo pipe.
 
     Returns (written_frames, audio_status, encoder_used, warnings).
     Raises ExportCancelledError on cancel.
+
+    `fps` is the input / source fps (used for rawvideo stdin timing).
+    `output_fps` is the intended output fps; differs when fps_mode=custom.
     """
     needs_resize = (out_w != width or out_h != height)
     warnings: list[str] = []
     audio_status = "video-only"
 
     encoder_args, encoder_used, encoder_warning = _build_encoder_cmd_fragment(
-        encoder_pref, ffmpeg_path, bitrate_kbps
+        encoder_pref, ffmpeg_path, bitrate_kbps, video_codec=video_codec,
     )
     if encoder_warning:
         warnings.append(encoder_warning)
+
+    has_audio = audio_mode in {"mux_if_possible", "copy_if_possible", "encode"}
 
     cmd: list[str] = [
         ffmpeg_path, "-y",
@@ -362,11 +432,24 @@ def _ffmpeg_pipe_export(
         "-s", f"{out_w}x{out_h}", "-r", str(fps),
         "-i", "pipe:0",
     ]
-    if audio_mode == "mux_if_possible":
+    if has_audio:
         cmd += ["-i", str(source_path), "-map", "0:v:0", "-map", "1:a:0?"]
     cmd += encoder_args
-    if audio_mode == "mux_if_possible":
-        cmd += ["-c:a", "aac", "-shortest"]
+    # Output frame rate override (when fps_mode=custom). This re-timestamps
+    # the stream without altering the number of frames piped in.
+    if output_fps != fps:
+        cmd += ["-r", str(output_fps)]
+    if has_audio:
+        # Container-specific audio codec (aac for mp4/mov, libopus for webm).
+        if audio_mode == "copy_if_possible":
+            cmd += ["-c:a", "copy", "-shortest"]
+        elif audio_mode == "encode":
+            bitrate = "192k" if audio_codec == "aac" else "128k"
+            cmd += ["-c:a", audio_codec, "-b:a", bitrate, "-shortest"]
+        else:
+            # mux_if_possible: re-encode source audio to the container's
+            # default codec (aac for mp4/mov, libopus for webm).
+            cmd += ["-c:a", audio_codec, "-shortest"]
     cmd.append(str(output))
 
     process = subprocess.Popen(
@@ -435,7 +518,7 @@ def _ffmpeg_pipe_export(
             f"ffmpeg encoding failed (exit {process.returncode}): {stderr_text[-300:]}",
         )
 
-    if audio_mode == "mux_if_possible":
+    if has_audio:
         audio_status = "muxed"
 
     return written_frames, audio_status, encoder_used, warnings
@@ -570,6 +653,13 @@ def export_project_video(
     resolution: str = "source",
     bitrate_kbps: int | None = None,
     encoder: str = "auto",
+    *,
+    fps_mode: str = "source",
+    fps_custom: float | None = None,
+    bitrate_mode: str = "auto",
+    target_size_mb: float | None = None,
+    video_codec: str = "h264",
+    container: str = "auto",
 ) -> dict:
     if project.video is None:
         return {
@@ -598,6 +688,29 @@ def export_project_video(
     output.parent.mkdir(parents=True, exist_ok=True)
     warnings: list[str] = []
 
+    # Resolve video codec / container compatibility up front so validation
+    # errors surface before we open the source video or write job status.
+    try:
+        resolved_codec, resolved_container, audio_codec, codec_warning = _resolve_codec_container(
+            video_codec, container, output.suffix
+        )
+    except ValueError as exc:
+        return {
+            "ok": False,
+            "error": {
+                "code": "EXPORT_CODEC_CONTAINER_INVALID",
+                "message": str(exc),
+                "details": {
+                    "video_codec": video_codec,
+                    "container": container,
+                    "output_suffix": output.suffix,
+                },
+            },
+            "warnings": [],
+        }
+    if codec_warning:
+        warnings.append(codec_warning)
+
     try:
         capture = _open_capture(source_path)
     except RuntimeError:
@@ -616,8 +729,38 @@ def export_project_video(
     fps = float(capture.get(cv2.CAP_PROP_FPS) or project.video.fps or 24.0)
     total_frames = int(capture.get(cv2.CAP_PROP_FRAME_COUNT) or project.video.frame_count or 0)
     out_w, out_h = _resolve_output_size(width, height, resolution)
-    if bitrate_kbps is None or bitrate_kbps <= 0:
-        bitrate_kbps = _auto_bitrate_kbps(out_w, out_h)
+
+    # fps_mode: "source" keeps input fps; "custom" overrides output timing only.
+    output_fps = fps
+    if fps_mode == "custom" and fps_custom is not None:
+        try:
+            candidate = float(fps_custom)
+        except (TypeError, ValueError):
+            candidate = 0.0
+        if candidate > 0.0:
+            output_fps = candidate
+
+    # Resolve final bitrate based on bitrate_mode. Legacy callers that pass
+    # bitrate_kbps without bitrate_mode get "manual" semantics.
+    if bitrate_mode == "target_size" and target_size_mb is not None:
+        try:
+            mb = float(target_size_mb)
+        except (TypeError, ValueError):
+            mb = 0.0
+        if mb > 0.0 and total_frames > 0 and output_fps > 0.0:
+            duration_sec = total_frames / output_fps
+            if duration_sec > 0.0:
+                # kbps = size(MB) * 8192 / duration(sec). Treat as total stream
+                # bitrate (audio overhead is small vs video).
+                bitrate_kbps = max(int(mb * 8192.0 / duration_sec), 200)
+        if bitrate_kbps is None or bitrate_kbps <= 0:
+            bitrate_kbps = _auto_bitrate_kbps(out_w, out_h)
+    elif bitrate_mode == "manual" and bitrate_kbps is not None and bitrate_kbps > 0:
+        pass  # keep provided kbps
+    else:
+        # "auto" (or legacy null) — use resolution-based preset
+        if bitrate_kbps is None or bitrate_kbps <= 0:
+            bitrate_kbps = _auto_bitrate_kbps(out_w, out_h)
     written_frames = 0
     audio_status = "video-only"
     encoder_used = "opencv"
@@ -649,6 +792,7 @@ def export_project_video(
                         out_w=out_w,
                         out_h=out_h,
                         fps=fps,
+                        output_fps=output_fps,
                         total_frames=total_frames,
                         mosaic_strength=mosaic_strength,
                         audio_mode=audio_mode,
@@ -656,6 +800,8 @@ def export_project_video(
                         job_id=job_id,
                         ffmpeg_path=ffmpeg_info["path"],
                         encoder_pref=encoder,
+                        video_codec=resolved_codec,
+                        audio_codec=audio_codec,
                     )
                     warnings.extend(ffmpeg_warnings)
                 except FfmpegEncodeError as exc:
@@ -687,6 +833,7 @@ def export_project_video(
                         out_w=out_w,
                         out_h=out_h,
                         fps=fps,
+                        output_fps=output_fps,
                         total_frames=total_frames,
                         mosaic_strength=mosaic_strength,
                         audio_mode=audio_mode,
@@ -694,6 +841,8 @@ def export_project_video(
                         job_id=job_id,
                         ffmpeg_path=ffmpeg_info["path"],
                         encoder_pref="cpu",
+                        video_codec=resolved_codec,
+                        audio_codec=audio_codec,
                     )
                     warnings.extend(ffmpeg_warnings)
             finally:
@@ -703,7 +852,7 @@ def export_project_video(
             warnings.append("ffmpeg not found — using OpenCV encoder (lower quality, no bitrate control).")
             with tempfile.TemporaryDirectory(prefix="taurimozaic-export-") as temp_dir:
                 temp_output = Path(temp_dir) / f"{output.stem}.video-only{output.suffix}"
-                writer = cv2.VideoWriter(str(temp_output), _choose_fourcc(temp_output), fps, (out_w, out_h))
+                writer = cv2.VideoWriter(str(temp_output), _choose_fourcc(temp_output), output_fps, (out_w, out_h))
                 if not writer.isOpened():
                     capture.release()
                     return {
@@ -836,14 +985,19 @@ def export_project_video(
             "output_path": str(output),
             "source_path": str(source_path),
             "frame_count": written_frames,
-            "fps": fps,
+            "fps": output_fps,
+            "source_fps": fps,
+            "fps_mode": fps_mode,
             "width": out_w,
             "height": out_h,
             "source_width": width,
             "source_height": height,
             "resolution": resolution,
             "bitrate_kbps": bitrate_kbps,
+            "bitrate_mode": bitrate_mode,
             "encoder": encoder_used,
+            "video_codec": resolved_codec,
+            "container": resolved_container,
             "effect": "mosaic",
             "audio": audio_status,
             "audio_mode": audio_mode,

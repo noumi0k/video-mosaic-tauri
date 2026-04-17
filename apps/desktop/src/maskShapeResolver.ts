@@ -414,10 +414,7 @@ function isRenderableSegment(segment: MaskSegment): boolean {
 function renderSegments(track: MaskTrack): MaskSegment[] {
   const explicitSegments = track.segments.filter(isRenderableSegment);
   if (explicitSegments.length > 0) {
-    if (
-      track.keyframes.length > 0 &&
-      explicitSegments.some((segment) => segment.state === "held" || segment.state === "uncertain")
-    ) {
+    if (track.keyframes.length > 0) {
       const firstFrame = track.keyframes[0]!.frame_index;
       const lastFrame = track.keyframes[track.keyframes.length - 1]!.frame_index;
       const keyframeSpanIsCovered = explicitSegments.some(

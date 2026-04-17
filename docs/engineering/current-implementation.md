@@ -1,6 +1,6 @@
 # Auto Mosaic 現行実装 正本
 
-最終更新: 2026-04-17 (Phase A / B core / C core / D 完了 — 目視レビュー前)
+最終更新: 2026-04-17 (目視レビュー 1 st 反映済み: KF 色仕様修正 / Ctrl+Shift+R / Ctrl+M / save dialog scope 修正 / inline-project mutation)
 
 この文書は、現行リポジトリで作業するエンジニア / AI エージェント向けの正本です。
 人間向けの説明は [../human/product-spec.md](../human/product-spec.md) に置き、ここでは実装判断に必要な境界、不変条件、実装済み状態を扱います。
@@ -97,10 +97,38 @@ Renderable segment state:
 
 `resolve_active_keyframe(frame_index)` は export 用で、renderable span の外では `None` を返す。
 `resolve_shape_for_editing(frame_index)` は編集用で、最初の keyframe 以後なら検出範囲外でも直近 shape を返せる。
+- 2026-04-17 review pass 以降、**手動作成マスクの内部表現は polygon を正本にする**。楕円ボタンも bbox 内接の polygon 頂点列を生成して保存し、全マスクが頂点編集できる状態を優先する。
+- backend / UI は既存 AI 検出由来の `shape_type="ellipse"` を引き続き読める必要がある。つまり保存正本は polygon 優先だが、読み取り互換として ellipse 対応は維持する。
 
 Keyframe には `rotation` (度、±180 正規化) がある。ellipse の回転は `cv2.ellipse(angle)` と `ctx.ellipse(rotation_rad)` に反映され、`_lerp_rotation` で最短路補間される。
 
 ## 7. 検出
+
+### Unsaved (inline) project mutation
+
+- 2026-04-17 レビューで「編集操作の都度 save dialog が出る」問題が指摘された (`feedback_save_dialog_scope.md`)。
+- 全ての mutation command (`create-track` / `update-track` / `duplicate-track` / `split-track` / `create-keyframe` / `update-keyframe` / `delete-keyframe` / `move-keyframe` / `save-project`) は payload の `project_path` が falsy のとき `project` (inline payload) に fallback する (`_project_mutation.load_project_for_mutation`)。
+- `_project_mutation.persist_project` は `path=None` のとき `atomic_write_text` をスキップし、response の `project_path` を `None` にする。
+- frontend の `projectRefForMutation()` が `project.project_path` の有無で `{ project_path }` または `{ project }` を自動選択する。未保存状態でトラック作成・編集を続けられる。
+- 明示的な保存 (Ctrl+S / Ctrl+Shift+S / File メニュー) のみが save dialog を開く。Export は queue が file-backed のため、未保存時はダイアログを開かず「Ctrl+S で保存してから書き出してください」エラーを表示する。
+
+### Timeline keyframe marker colors (feature_list §5-1)
+
+| source | background | 意味 |
+| --- | --- | --- |
+| `manual` | `#FFFFFF` (白) | ユーザー手動入力 |
+| `auto` / `detector` | `#F5C518` (金) | AI 検出の直接結果 |
+| `auto-anchored` (`source_detail = detector_anchored`) | 金 + 青リング | anchor 修正済み |
+| `predicted` | `#9CA3AF` (灰) | motion 予測補完 |
+| `re-detected` | `#60A5FA` (薄青) | lost 状態から再検出 |
+| `contour_follow` | `#22C55E` (緑) | Optical Flow 追従 |
+| `interpolated` | `#E0E0E0` (薄灰) | 補間 (メモリ上のみ、通常は表示されない) |
+| `anchor_fallback` | auto-anchored と同扱い | ContinuityService による修正 |
+
+### Track editing (duplicate / split)
+
+- `duplicate-track`: 選択 track を `keyframes` / `segments` / `style` の deepcopy と新 `track_id` (`track-<uuid4>`) で複製。`label` には ` (copy)` を付与、`user_edited=True` / `user_locked=False` で manual 意図マーク。
+- `split-track`: `split_frame` を境に keyframes を分配し、境界を跨ぐ segments はトリムして両側へ分散。左右どちらかの keyframes が空になる分割は `SPLIT_EMPTY_SIDE` で拒否。右側 track は ` (split)` label + 新 `track_id`、元 track は in-place 更新 + `mark_user_edited()`。
 
 Backend command は `detect-video`, `start-detect-job`, `run-detect-job`, `get-detect-status`, `get-detect-result`, `cancel-detect-job`, `list-detect-jobs`, `cleanup-detect-jobs` を持つ。
 
@@ -127,6 +155,13 @@ Model 管理は file existence だけで判断しない。
 
 Backend Python 変更後に review build を作る場合は `npm.cmd run review:runtime` を実行する。
 
+### Installed model management (2026-04-17)
+
+- CLI commands: `list-installed-models` / `delete-installed-model`。
+- `list-installed-models` は `model_dir` 直下の `.onnx` / `.pt` を走査し、`doctor._check_model_file` で integrity を判定する。catalog 未登録ファイルは `known: false` で表示する。
+- `delete-installed-model` は `^[A-Za-z0-9._\-]+$` と `resolve().relative_to(model_dir)` で path traversal を二重防御する。存在しないファイルは `deleted: false` を返す冪等削除。
+- frontend は右アサイドに「導入済みモデル」パネルを追加し、ファイル名 / サイズ / status / source_label と削除ボタンを表示する。削除後は `list-installed-models` と `doctor` を再読込する。
+
 ## 9. Export
 
 Export は Python backend の責務。
@@ -136,8 +171,12 @@ Frontend は設定と job/cancel/status 表示を扱う。
 
 - `resolution`: `source`, `720p`, `1080p`, `4k`
 - `mosaic_strength`
-- `audio_mode`: `mux_if_possible`, `video_only`
+- `audio_mode`: `mux_if_possible` (legacy), `video_only` (legacy), `copy_if_possible`, `encode`, `none` (→ `video_only` 正規化)。`copy_if_possible` は `-c:a copy`、`encode` は `-c:a aac -b:a 192k`、`mux_if_possible` は従来通り `-c:a aac`
 - `bitrate_kbps`: `null` なら auto
+- `bitrate_mode`: `auto` (解像度依存の preset) / `manual` (`bitrate_kbps` 指定必須) / `target_size` (`target_size_mb` 指定必須、`kbps = mb * 8192 / duration_sec`)
+- `fps_mode`: `source` / `custom` (`fps_custom` (0<x≤240) 指定必須)。ffmpeg への `-r <output_fps>` で出力タイミングを書き換え
+- `video_codec`: `h264` (libx264 / h264_nvenc/qsv/amf) / `vp9` (libvpx-vp9、GPU エンコーダなし)
+- `container`: `auto` (出力拡張子から推論) / `mp4` / `mov` / `webm`。h264 は mp4/mov、vp9 は webm のみ互換 (`_resolve_codec_container` で command 層から validation)。音声コーデックはコンテナに従う (mp4/mov → aac、webm → libopus)
 - `encoder`: `auto`, `gpu`, `cpu`
 
 FFmpeg pipe export を優先し、失敗または unavailable の場合は OpenCV fallback を使う。
@@ -168,6 +207,15 @@ GPU encoder は `auto` / `gpu` / `cpu` を扱う。
 - CLI commands: `save-recovery-snapshot`, `list-recovery-snapshots`, `delete-recovery-snapshot`.
 - レコードは `{ id, project, read_model, timestamp, confirmed_danger_frames }`。壊れた JSON は `list-recovery-snapshots` の `broken[]` に隔離される。
 - confirmed danger frames (書き出し前レビュー済みフレームのキー) は snapshot 側に保存する方針。project ファイルには載せない。
+
+### Detect settings persistence (2026-04-17)
+
+- detect 設定 (`backend` / `device` / `confidence_threshold` / `sample_every` / `max_samples` / `inference_resolution` / `batch_size` / `contour_mode` / `precise_face_contour` / `vram_saving_mode` / `selected_categories`) は `user-data/config/detect-settings.json` に単一オブジェクトとして永続化される。
+- CLI commands: `load-detect-settings`, `save-detect-settings`。
+- `save-detect-settings` は型のみ検証し、enum 値自体は検証しない。未知のフィールドは破棄、型が合わないフィールドも無視 (silent drop)。
+- `load-detect-settings` は壊れた JSON を `broken: true, settings: null` として返す (success レスポンス)。
+- frontend は mount 時に `load-detect-settings` を呼び、取得した値で state を hydrate。以後は detect 関連 state が変化すると 800ms debounce で `save-detect-settings` を呼ぶ。
+- 永続化された設定が存在する場合は doctor ベースの device/batch 既定値をスキップし、ユーザー設定を優先する。
 
 ### Danger warning flow (export 前)
 
