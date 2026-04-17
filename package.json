@@ -6,6 +6,7 @@
     "apps/desktop"
   ],
   "scripts": {
+    "check:mojibake": "node scripts/check-mojibake.mjs",
     "desktop:dev": "npm --workspace apps/desktop run tauri dev",
     "desktop:build": "npm --workspace apps/desktop run tauri build"
   }
